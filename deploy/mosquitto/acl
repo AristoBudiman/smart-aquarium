@@ -1,0 +1,8 @@
+user backend
+topic readwrite aquarium/#
+topic write server/heartbeat
+
+user node
+topic read server/heartbeat
+pattern readwrite aquarium/%c/#
+
