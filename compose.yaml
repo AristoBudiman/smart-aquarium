@@ -1,0 +1,50 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: aquarium
+      POSTGRES_USER: aquarium
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    command: mosquitto -c /mosquitto/config/dev.conf
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./deploy/mosquitto:/mosquitto/config:ro
+
+  backend:
+    image: golang:1.26-alpine
+    working_dir: /app
+    command: go run ./cmd/server
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://aquarium:${POSTGRES_PASSWORD}@db:5432/aquarium
+      MQTT_URL: tcp://mosquitto:1883
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./backend:/app
+      - go-cache:/go
+    depends_on:
+      - db
+      - mosquitto
+
+  simulator:
+    profiles: [tools]
+    build: ./tools/simulator
+    environment:
+      MQTT_HOST: mosquitto
+    depends_on:
+      - mosquitto
+
+volumes:
+  db-data:
+  go-cache:
+
