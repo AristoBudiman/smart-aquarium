@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+firmware/smart_aquarium/config.h
+deploy/mosquitto/passwd
+node_modules/
+dist/
+__pycache__/
+.venv/
+*.log
+.DS_Store
