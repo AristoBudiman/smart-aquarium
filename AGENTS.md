@@ -10,6 +10,10 @@ Tugas besar kelompok mata kuliah Teknologi IoT. Sistem memantau suhu dan kekeruh
 4. Sampaikan rencana singkat sebelum mengubah banyak file.
 5. Setelah selesai, jalankan pemeriksaan yang tertulis di instruksi peran dan laporkan hasilnya apa adanya.
 
+## Ketergantungan antarperan
+ 
+Sebelum memulai tugas, baca `docs/agent/ketergantungan.md` dan cek prasyarat di `origin/main`. Jangan membuat implementasi asli untuk bagian peran lain. Kalau prasyarat belum ada, kerjakan tugas lain atau laporkan `TERTAHAN`.
+
 ## Urutan kebenaran
 
 Kalau ada perbedaan, ikuti urutan ini:
