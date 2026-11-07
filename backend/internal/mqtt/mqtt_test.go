@@ -204,4 +204,3 @@ func TestConfigFromEnv(t *testing.T) {
 		t.Fatalf("ConfigFromEnv = %+v", cfg)
 	}
 }
-

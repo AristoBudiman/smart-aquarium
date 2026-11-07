@@ -36,4 +36,3 @@ func Decide(prev core.Actuators, c core.Classes, temp float64) core.Actuators {
 
 	return out
 }
-

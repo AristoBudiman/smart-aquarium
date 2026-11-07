@@ -35,6 +35,7 @@ type Service struct {
 
 	mu          sync.Mutex
 	tempInvalid map[string]bool
+	nodeMu      map[string]*sync.Mutex
 }
 
 // New membuat instance Service ingest baru.
@@ -45,7 +46,21 @@ func New(store core.Store, cmd core.Commander, broadcaster core.Broadcaster, not
 		broadcaster: broadcaster,
 		notifier:    notifier,
 		tempInvalid: make(map[string]bool),
+		nodeMu:      make(map[string]*sync.Mutex),
 	}
+}
+
+func (s *Service) lockNode(nodeID string) func() {
+	s.mu.Lock()
+	m, ok := s.nodeMu[nodeID]
+	if !ok {
+		m = &sync.Mutex{}
+		s.nodeMu[nodeID] = m
+	}
+	s.mu.Unlock()
+
+	m.Lock()
+	return m.Unlock
 }
 
 // HandleMessage memproses pesan MQTT berdasarkan topiknya:
@@ -55,6 +70,9 @@ func (s *Service) HandleMessage(ctx context.Context, topic string, payload []byt
 	if !ok {
 		return
 	}
+
+	unlock := s.lockNode(nodeID)
+	defer unlock()
 
 	switch kind {
 	case "telemetry":
@@ -99,14 +117,18 @@ func (s *Service) handleTelemetry(ctx context.Context, nodeID string, payload []
 
 	// 2. Tolak suhu di luar rentang kontrak (0-50 °C) dan buat alert sekali per perubahan kondisi.
 	if temp < MinTemp || temp > MaxTemp {
-		if s.markTempInvalid(nodeID, true) {
-			s.ensureNode(ctx, nodeID)
+		if !s.ensureNode(ctx, nodeID) {
+			return
+		}
+		if !s.isTempInvalid(nodeID) {
 			msg := fmt.Sprintf("Suhu %s °C di luar rentang valid (WARNING)", formatDesimalKoma(temp, 1))
-			s.saveAndEmitAlert(ctx, nodeID, time.Now().UTC(), core.ClassWarning, msg)
+			if s.saveAndEmitAlert(ctx, nodeID, time.Now().UTC(), core.ClassWarning, msg) {
+				s.setTempInvalid(nodeID, true)
+			}
 		}
 		return
 	}
-	s.markTempInvalid(nodeID, false)
+	s.setTempInvalid(nodeID, false)
 
 	// 3. Panggil EnsureNode. Kalau node baru, kirim config manual retained lewat Commander.SetMode.
 	if !s.ensureNode(ctx, nodeID) {
@@ -166,7 +188,7 @@ func (s *Service) handleTelemetry(ctx context.Context, nodeID string, payload []
 	var alertEvent *core.AlertEvent
 	if classes.Status != core.ClassNormal && classes.Status.Rank() > snap.LastStatus.Rank() {
 		msg := formatPesanStatus(nodeID, temp, ntu, classes, autoAction)
-		ev := s.saveAndNotifyAlert(ctx, nodeID, now, classes.Status, msg)
+		ev, _ := s.saveAndNotifyAlert(ctx, nodeID, now, classes.Status, msg)
 		alertEvent = &ev
 	}
 
@@ -293,27 +315,31 @@ func (s *Service) ensureNode(ctx context.Context, nodeID string) bool {
 	return true
 }
 
-// markTempInvalid memperbarui status suhu tidak valid per node dan mengembalikan true
-// hanya saat transisi dari valid -> tidak valid.
-func (s *Service) markTempInvalid(nodeID string, invalid bool) bool {
+func (s *Service) isTempInvalid(nodeID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	wasInvalid := s.tempInvalid[nodeID]
-	s.tempInvalid[nodeID] = invalid
-	return invalid && !wasInvalid
+	return s.tempInvalid[nodeID]
 }
 
-func (s *Service) saveAndNotifyAlert(ctx context.Context, nodeID string, ts time.Time, level core.Class, msg string) core.AlertEvent {
+func (s *Service) setTempInvalid(nodeID string, invalid bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tempInvalid[nodeID] = invalid
+}
+
+func (s *Service) saveAndNotifyAlert(ctx context.Context, nodeID string, ts time.Time, level core.Class, msg string) (core.AlertEvent, bool) {
 	alert := core.Alert{
 		NodeID:  nodeID,
 		TS:      ts,
 		Level:   level,
 		Message: msg,
 	}
+	saved := false
 	id, err := s.store.SaveAlert(ctx, alert)
 	if err != nil {
 		log.Printf("ingest: gagal simpan alert %s: %v", nodeID, err)
 	} else {
+		saved = true
 		alert.ID = id
 		if s.notifier != nil {
 			s.notifier.Notify(ctx, alert)
@@ -324,14 +350,15 @@ func (s *Service) saveAndNotifyAlert(ctx context.Context, nodeID string, ts time
 		NodeID:  nodeID,
 		Level:   level,
 		Message: msg,
-	}
+	}, saved
 }
 
-func (s *Service) saveAndEmitAlert(ctx context.Context, nodeID string, ts time.Time, level core.Class, msg string) {
-	ev := s.saveAndNotifyAlert(ctx, nodeID, ts, level, msg)
+func (s *Service) saveAndEmitAlert(ctx context.Context, nodeID string, ts time.Time, level core.Class, msg string) bool {
+	ev, saved := s.saveAndNotifyAlert(ctx, nodeID, ts, level, msg)
 	if s.broadcaster != nil {
 		s.broadcaster.Publish(ev)
 	}
+	return saved
 }
 
 func formatDesimalKoma(v float64, presisi int) string {
@@ -367,4 +394,3 @@ func ringkasanAksiAuto(prev, next core.Actuators, hasState bool) string {
 	}
 	return strings.Join(aksi, " ")
 }
-

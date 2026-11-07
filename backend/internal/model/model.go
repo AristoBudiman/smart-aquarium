@@ -26,4 +26,3 @@ func Predict(temp, ntu float64) core.Classes {
 		Status:    core.Worst(suhu, kekeruhan, overall),
 	}
 }
-

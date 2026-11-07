@@ -30,4 +30,3 @@ func TestSamaDenganPython(t *testing.T) {
 		}
 	}
 }
-

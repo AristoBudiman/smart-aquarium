@@ -102,7 +102,7 @@ func (s *Service) sendAsync(alert core.Alert, text string) {
 			continue
 		}
 		if err := s.sendOne(ctx, chatID, text); err != nil {
-			log.Printf("notify: gagal kirim ke chat_id %s: %s", chatID, s. redactToken(err.Error()))
+			log.Printf("notify: gagal kirim ke chat_id %s: %s", chatID, s.redactToken(err.Error()))
 			continue
 		}
 		berhasil = true
@@ -150,4 +150,3 @@ func (s *Service) redactToken(msg string) string {
 	}
 	return strings.ReplaceAll(msg, s.token, "[REDACTED]")
 }
-

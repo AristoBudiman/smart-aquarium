@@ -2,7 +2,9 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +19,10 @@ type fakeStore struct {
 	predictions []core.Classes
 	actLogs     []actuatorLogEntry
 	alerts      []core.Alert
+
+	ensureErr    error
+	saveAlertErr error
+	onEnsureNode func(nodeID string)
 }
 
 type actuatorLogEntry struct {
@@ -32,6 +38,18 @@ func newFakeStore() *fakeStore {
 }
 
 func (f *fakeStore) EnsureNode(_ context.Context, nodeID string) (bool, error) {
+	f.mu.Lock()
+	hook := f.onEnsureNode
+	err := f.ensureErr
+	f.mu.Unlock()
+
+	if hook != nil {
+		hook(nodeID)
+	}
+	if err != nil {
+		return false, err
+	}
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, ok := f.nodes[nodeID]; ok {
@@ -101,6 +119,9 @@ func (f *fakeStore) LogActuators(_ context.Context, nodeID string, a core.Actuat
 func (f *fakeStore) SaveAlert(_ context.Context, a core.Alert) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.saveAlertErr != nil {
+		return 0, f.saveAlertErr
+	}
 	a.ID = int64(len(f.alerts) + 1)
 	f.alerts = append(f.alerts, a)
 	return a.ID, nil
@@ -267,6 +288,119 @@ func TestTelemetryOutOfRangeTempAlertOncePerCondition(t *testing.T) {
 	}
 }
 
+func TestOutOfRangeTempEnsureNodeAndSaveAlertFailureRetries(t *testing.T) {
+	store := newFakeStore()
+	svc := New(store, nil, nil, nil)
+	ctx := context.Background()
+
+	// 1. EnsureNode gagal -> tidak boleh memanggil SaveAlert dan pesan berikutnya harus tetap mencoba
+	store.ensureErr = errors.New("db mati")
+	svc.HandleMessage(ctx, "aquarium/aq-err01/telemetry", []byte(`{"temp":60,"ntu":10}`))
+	if len(store.alerts) != 0 {
+		t.Fatalf("SaveAlert seharusnya tidak dipanggil saat EnsureNode gagal: %+v", store.alerts)
+	}
+
+	// 2. EnsureNode pulih, tapi SaveAlert sempat gagal -> pesan berikutnya tetap mencoba membuat alert
+	store.ensureErr = nil
+	store.saveAlertErr = errors.New("insert alert gagal")
+	svc.HandleMessage(ctx, "aquarium/aq-err01/telemetry", []byte(`{"temp":60,"ntu":10}`))
+	if len(store.alerts) != 0 {
+		t.Fatalf("alerts seharusnya masih kosong saat SaveAlert gagal: %+v", store.alerts)
+	}
+
+	// 3. SaveAlert pulih -> pesan berikutnya berhasil membuat alert
+	store.saveAlertErr = nil
+	svc.HandleMessage(ctx, "aquarium/aq-err01/telemetry", []byte(`{"temp":60,"ntu":10}`))
+	if len(store.alerts) != 1 {
+		t.Fatalf("alert seharusnya dibuat pada percobaan ulang: %+v", store.alerts)
+	}
+}
+
+func TestPerNodeSerializationAndCrossNodeParallelism(t *testing.T) {
+	store := newFakeStore()
+	svc := New(store, nil, nil, nil)
+	ctx := context.Background()
+
+	// Bagian A: Dua pesan dari node yang sama tidak diproses bersamaan
+	masukPertama := make(chan struct{})
+	lepasPertama := make(chan struct{})
+	var aktifNodeSama int32
+	var tumpangTindih int32
+
+	store.onEnsureNode = func(nodeID string) {
+		if nodeID != "aq-sama" {
+			return
+		}
+		if atomic.AddInt32(&aktifNodeSama, 1) > 1 {
+			atomic.StoreInt32(&tumpangTindih, 1)
+		}
+		select {
+		case masukPertama <- struct{}{}:
+			<-lepasPertama
+		default:
+		}
+		atomic.AddInt32(&aktifNodeSama, -1)
+	}
+
+	var wgSama sync.WaitGroup
+	wgSama.Add(2)
+	go func() {
+		defer wgSama.Done()
+		svc.HandleMessage(ctx, "aquarium/aq-sama/state", []byte(`{"heater":0,"fan":1,"pump":0,"failsafe":false}`))
+	}()
+	<-masukPertama
+
+	selesaiKedua := make(chan struct{})
+	go func() {
+		defer wgSama.Done()
+		svc.HandleMessage(ctx, "aquarium/aq-sama/telemetry", []byte(`{"temp":27,"ntu":10}`))
+		close(selesaiKedua)
+	}()
+
+	select {
+	case <-selesaiKedua:
+		t.Fatal("pesan kedua dari node yang sama selesai sebelum pesan pertama dilepas")
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	close(lepasPertama)
+	wgSama.Wait()
+	if atomic.LoadInt32(&tumpangTindih) != 0 {
+		t.Fatal("dua pesan dari node yang sama diproses bersamaan")
+	}
+
+	// Bagian B: Dua pesan dari node berbeda tetap bisa diproses paralel
+	tibaNodeBerbeda := make(chan string, 2)
+	lepasNodeBerbeda := make(chan struct{})
+	store.onEnsureNode = func(nodeID string) {
+		if nodeID == "aq-par1" || nodeID == "aq-par2" {
+			tibaNodeBerbeda <- nodeID
+			<-lepasNodeBerbeda
+		}
+	}
+
+	var wgBeda sync.WaitGroup
+	wgBeda.Add(2)
+	go func() {
+		defer wgBeda.Done()
+		svc.HandleMessage(ctx, "aquarium/aq-par1/status", []byte("online"))
+	}()
+	go func() {
+		defer wgBeda.Done()
+		svc.HandleMessage(ctx, "aquarium/aq-par2/status", []byte("online"))
+	}()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-tibaNodeBerbeda:
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("node berbeda tidak berjalan secara paralel")
+		}
+	}
+	close(lepasNodeBerbeda)
+	wgBeda.Wait()
+}
+
 func TestStateAndStatusTopics(t *testing.T) {
 	store := newFakeStore()
 	bc := &fakeBroadcaster{}
@@ -303,4 +437,3 @@ func TestStateAndStatusTopics(t *testing.T) {
 		t.Fatal("node seharusnya offline")
 	}
 }
-

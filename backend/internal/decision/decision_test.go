@@ -102,4 +102,3 @@ func TestDecide(t *testing.T) {
 		})
 	}
 }
-

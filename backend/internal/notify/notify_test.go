@@ -146,4 +146,3 @@ func TestRedactTokenOnError(t *testing.T) {
 		t.Fatalf("token bocor pada pesan error: %s", terfilter)
 	}
 }
-

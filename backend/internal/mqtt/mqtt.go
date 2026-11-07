@@ -227,4 +227,3 @@ func waitToken(ctx context.Context, tok paho.Token) error {
 		return ctx.Err()
 	}
 }
-
