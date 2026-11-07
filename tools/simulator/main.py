@@ -4,7 +4,7 @@ Menyimulasikan node sensor yang mengirim data ke broker MQTT.
 
 Fitur:
 - Koneksi MQTT dengan LWT, status online/offline.
-- Pengiriman telemetry JSON setiap interval.
+- Pengiriman telemetry dan state JSON setiap interval.
 - Memproses perintah aktuator dari topik cmd dan membalas ke topik state.
 - Mendukung skenario: normal, panas, dingin, keruh, ganda, mati.
 """
@@ -43,13 +43,13 @@ NILAI_AWAL_SKENARIO: dict[str, dict[str, float]] = {
 
 
 # ---------------------------------------------------------------------------
-# Laju perubahan sensor per interval — mudah disesuaikan jika perlu
+# Laju perubahan sensor per interval — dibuat jelas terlihat saat demo
 # ---------------------------------------------------------------------------
 # Suhu (°C per interval):
-LAJU_NAIK_SUHU: float = 0.2   # heater ON, fan OFF
-LAJU_TURUN_SUHU: float = 0.2  # fan ON, heater OFF
+LAJU_NAIK_SUHU: float = 0.3   # heater ON, fan OFF
+LAJU_TURUN_SUHU: float = 0.3  # fan ON, heater OFF
 # Kekeruhan (NTU per interval):
-LAJU_TURUN_NTU: float = 0.5   # pump ON
+LAJU_TURUN_NTU: float = 5.0   # pump ON
 
 # Batas nilai sensor yang diizinkan (kontrak validasi telemetry)
 BATAS_TEMP_MIN: float = 0.0
@@ -67,7 +67,7 @@ class NodeSimulator:
     Tanggung jawab:
     - Menyambung ke broker MQTT dengan LWT yang benar.
     - Menerbitkan status 'online' saat tersambung.
-    - Mengirim telemetry JSON setiap interval.
+    - Mengirim telemetry dan state JSON setiap interval.
     - Subscribe ke topik cmd, config, dan server/heartbeat.
     - Memproses perintah cmd dan membalas dengan state terbaru.
     - Mendukung pemutusan koneksi paksa untuk skenario 'mati'.
@@ -92,8 +92,8 @@ class NodeSimulator:
 
         # Nilai sensor: disalin dari tabel skenario
         nilai_awal = NILAI_AWAL_SKENARIO.get(skenario, NILAI_AWAL_SKENARIO["normal"])
-        self.temp: float = nilai_awal["temp"]
-        self.ntu: float = nilai_awal["ntu"]
+        self.temp: float = float(nilai_awal["temp"])
+        self.ntu: float = float(nilai_awal["ntu"])
 
         # Status aktuator awal (semua mati)
         self.heater: int = 0
@@ -175,19 +175,24 @@ class NodeSimulator:
         """
         try:
             data = json.loads(payload_str)
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, TypeError) as exc:
             self.log.warning("Payload cmd tidak valid (bukan JSON): %s — %s", payload_str, exc)
             return
 
-        # Ambil nilai tiap aktuator; abaikan field yang tidak dikenal
+        if not isinstance(data, dict):
+            self.log.warning("Payload cmd diabaikan (bukan objek JSON): %s", payload_str)
+            return
+
+        # Ambil nilai tiap aktuator; abaikan field yang tidak dikenal atau tidak valid
         berubah = False
         for aktuator in ("heater", "fan", "pump"):
             if aktuator not in data:
                 continue
-            nilai_baru = int(data[aktuator])
-            if nilai_baru not in (0, 1):
-                self.log.warning("Nilai %s tidak valid: %s (harus 0 atau 1)", aktuator, nilai_baru)
+            nilai_mentah = data[aktuator]
+            if isinstance(nilai_mentah, bool) or not isinstance(nilai_mentah, int) or nilai_mentah not in (0, 1):
+                self.log.warning("Nilai %s tidak valid: %r (harus 0 atau 1)", aktuator, nilai_mentah)
                 continue
+            nilai_baru = int(nilai_mentah)
             nilai_lama = getattr(self, aktuator)
             if nilai_baru != nilai_lama:
                 setattr(self, aktuator, nilai_baru)
@@ -237,8 +242,8 @@ class NodeSimulator:
 
         # 3. Subscribe ke topik yang perlu didengarkan
         #    - cmd    : perintah aktuator dari backend (QoS 1 sesuai kontrak)
-        #    - config : konfigurasi mode auto/manual
-        #    - server/heartbeat : detak jantung backend
+        #    - config : konfigurasi mode auto/manual (QoS 1 sesuai kontrak)
+        #    - server/heartbeat : detak jantung backend (QoS 0 sesuai kontrak)
         topik_langganan = [
             (self._topik_cmd, 1),
             (self._topik_config, 1),
@@ -265,16 +270,6 @@ class NodeSimulator:
         reason_code,
         properties,
     ) -> None:
-        # Paho v2 menyediakan dua cara membedakan jenis disconnect:
-        # - disconnect_flags.is_disconnect_packet_from_server: True jika broker
-        #   yang mengirim paket DISCONNECT (misalnya kick/timeout dari sisi broker).
-        # - reason_code.is_failure: True jika bukan disconnect yang bersih (rc != 0).
-        #
-        # Kombinasi keduanya:
-        #   is_failure=False, is_disconnect_packet_from_server=False
-        #     → kita yang memanggil disconnect() secara normal (clean shutdown).
-        #   is_failure=True atau is_disconnect_packet_from_server=True
-        #     → disconnect tidak direncanakan, kemungkinan akan direkoneksi otomatis.
         if reason_code.is_failure:
             self.log.warning(
                 "Terputus tidak bersih dari broker (kode: %s, dari_server: %s)",
@@ -304,16 +299,12 @@ class NodeSimulator:
 
         # Routing berdasarkan topik yang diterima
         if message.topic == self._topik_cmd:
-            # Perintah aktuator dari backend: perbarui state dan balas ke topik state
             self._proses_cmd(payload_str)
 
         elif message.topic == self._topik_config:
-            # Konfigurasi mode (auto/manual) — dicatat untuk kelengkapan log
-            # Logika mode penuh akan diimplementasi jika dibutuhkan oleh pengujian integrasi
             self.log.info("Config diterima: %s", payload_str)
 
         elif message.topic == "server/heartbeat":
-            # Detak jantung backend — cukup dicatat, tidak perlu tindakan
             self.log.debug("Heartbeat diterima: %s", payload_str)
 
     # ------------------------------------------------------------------
@@ -375,7 +366,7 @@ class NodeSimulator:
     def _kirim_state(self) -> None:
         """
         Kirim status aktuator aktual ke topik state.
-        Dipanggil saat: pertama kali tersambung dan setiap relay berubah akibat cmd.
+        Dipanggil saat: pertama kali tersambung, setiap menerima cmd, dan berkala.
         """
         payload = json.dumps({
             "heater": self.heater,
@@ -414,12 +405,36 @@ class NodeSimulator:
         self.log.info("Telemetry -> %s : %s", self._topik_telemetry, payload)
 
     # ------------------------------------------------------------------
+    # Metode internal: putus koneksi secara paksa tanpa paket DISCONNECT
+    # ------------------------------------------------------------------
+
+    def _putus_paksa_tanpa_disconnect(self) -> None:
+        """
+        Tutup koneksi TCP secara paksa tanpa mengirim paket MQTT DISCONNECT
+        supaya broker menerbitkan LWT 'offline'.
+
+        Urutan:
+        1. Ambil referensi socket aktif dari klien.
+        2. Hentikan thread loop_start terlebih dahulu dengan loop_stop() agar
+           thread jaringan berhenti bersih dan tidak melempar exception saat
+           socket ditutup.
+        3. Tutup socket TCP secara langsung tanpa memanggil disconnect().
+        """
+        sock = self._client.socket()
+        self._client.loop_stop()
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+    # ------------------------------------------------------------------
     # Metode publik: jalankan node ini
     # ------------------------------------------------------------------
 
     def jalankan(self) -> None:
         """
-        Sambungkan ke broker lalu mulai loop pengiriman telemetry.
+        Sambungkan ke broker lalu mulai loop pengiriman telemetry dan state.
         Fungsi ini berjalan hingga program dihentikan (Ctrl+C).
         """
         self.log.info(
@@ -441,31 +456,26 @@ class NodeSimulator:
             self._client.loop_stop()
             return
 
-        # Jika skenario "mati", putus koneksi paksa setelah 2 detik
-        # supaya LWT otomatis dikirim oleh broker.
+        # Jika skenario "mati", kirim telemetry awal lalu putus koneksi paksa
+        # setelah 2 detik supaya LWT otomatis dikirim oleh broker.
         if self.skenario == "mati":
+            self._kirim_telemetry()
             self.log.info("Skenario 'mati': memutus koneksi paksa dalam 2 detik...")
             time.sleep(2)
-            # loop_stop(force=True) memutus tanpa DISCONNECT yang bersih
-            self._client.loop_stop(force=True)
+            self._putus_paksa_tanpa_disconnect()
             self.log.info("Koneksi diputus paksa. LWT 'offline' akan dikirim broker.")
             return
 
-        # Loop utama: perbarui sensor lalu kirim telemetry setiap interval
+        # Loop utama: kirim telemetry nilai awal + state berkala, tidur, lalu perbarui sensor
         try:
             while True:
-                self._perbarui_sensor()
                 self._kirim_telemetry()
+                self._kirim_state()
                 time.sleep(self.interval)
+                self._perbarui_sensor()
         except KeyboardInterrupt:
             self.log.info("Dihentikan oleh pengguna.")
         finally:
-            # Urutan shutdown yang benar:
-            # 1. disconnect() mengantrekan paket DISCONNECT ke buffer internal paho.
-            # 2. loop_stop() bersifat blocking — menunggu thread jaringan selesai.
-            #    Thread tersebut memflush paket DISCONNECT ke socket sebelum berhenti.
-            # Dengan urutan ini, broker menerima DISCONNECT yang bersih
-            # sehingga tidak memicu reconnect otomatis yang tidak diinginkan.
             self._client.disconnect()
             self._client.loop_stop()
             self.log.info("Koneksi ditutup dengan bersih.")
@@ -475,7 +485,17 @@ class NodeSimulator:
 # Fungsi utama: parsing argumen dan menjalankan semua node di thread terpisah
 # ---------------------------------------------------------------------------
 
-def parse_argumen() -> argparse.Namespace:
+def _env_int(nama: str, bawaan: int) -> int:
+    nilai = os.environ.get(nama, "").strip()
+    if not nilai:
+        return bawaan
+    try:
+        return int(nilai)
+    except ValueError:
+        return bawaan
+
+
+def parse_argumen(argv: list[str] | None = None) -> argparse.Namespace:
     """Parsing argumen baris perintah sesuai spesifikasi kontrak."""
     parser = argparse.ArgumentParser(
         description="Simulator node akuarium untuk proyek Smart Aquarium.",
@@ -484,33 +504,33 @@ def parse_argumen() -> argparse.Namespace:
     parser.add_argument(
         "--nodes",
         type=int,
-        default=3,
+        default=_env_int("SIM_NODES", 3),
         metavar="N",
-        help="Jumlah node yang disimulasikan.",
+        help="Jumlah node yang disimulasikan. Bawaan: env SIM_NODES atau 3.",
     )
     parser.add_argument(
         "--scenario",
-        default="normal",
+        default=os.environ.get("SIM_SCENARIO", "").strip() or "normal",
         choices=list(NILAI_AWAL_SKENARIO.keys()),
-        help="Skenario simulasi.",
+        help="Skenario simulasi. Bawaan: env SIM_SCENARIO atau 'normal'.",
     )
     parser.add_argument(
         "--interval",
         type=int,
-        default=5,
+        default=_env_int("SIM_INTERVAL", 5),
         metavar="DETIK",
-        help="Jarak waktu antarkirim telemetry (detik).",
+        help="Jarak waktu antarkirim telemetry (detik). Bawaan: env SIM_INTERVAL atau 5.",
     )
     parser.add_argument(
         "--host",
-        default=os.environ.get("MQTT_HOST", "localhost"),
+        default=os.environ.get("MQTT_HOST", "").strip() or "localhost",
         help="Alamat broker MQTT. Bawaan: env MQTT_HOST atau 'localhost'.",
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=1883,
-        help="Port broker MQTT.",
+        default=_env_int("MQTT_PORT", 1883),
+        help="Port broker MQTT. Bawaan: env MQTT_PORT atau 1883.",
     )
     parser.add_argument(
         "--username",
@@ -522,14 +542,18 @@ def parse_argumen() -> argparse.Namespace:
         default=os.environ.get("MQTT_PASSWORD", ""),
         help="Password MQTT. Bawaan: env MQTT_PASSWORD.",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def buat_id_node(jumlah_node: int) -> list[str]:
+    """Buat daftar ID node aq-sim001, aq-sim002, dst."""
+    return [f"aq-sim{i:03d}" for i in range(1, jumlah_node + 1)]
 
 
 def main() -> None:
     args = parse_argumen()
 
-    # Buat node_id: aq-sim001, aq-sim002, ...
-    node_ids = [f"aq-sim{i:03d}" for i in range(1, args.nodes + 1)]
+    node_ids = buat_id_node(args.nodes)
 
     logging.info(
         "Memulai %d node | skenario=%s | interval=%ds | broker=%s:%d",
@@ -564,7 +588,7 @@ def main() -> None:
         t = threading.Thread(target=sim.jalankan, name=node_id, daemon=True)
         threads.append(t)
         t.start()
-        # Jeda kecil antarnoda agar koneksi tidak serentak
+        # Jeda kecil antarnode agar koneksi tidak serentak
         time.sleep(0.2)
 
     # Tunggu semua thread selesai (atau Ctrl+C)
