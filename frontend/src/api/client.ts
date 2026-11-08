@@ -47,4 +47,4 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
   return fallback
 }
 
-export const useMockApi = import.meta.env.VITE_MOCK !== '0'
+export const useMockApi = import.meta.env.VITE_MOCK === '1'

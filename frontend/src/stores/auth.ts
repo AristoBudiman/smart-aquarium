@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { login as loginRequest } from '../api/auth'
+import { getApiErrorMessage } from '../api/client'
 
 export const useAuthStore = defineStore('auth', () => {
   const token = ref(localStorage.getItem('token') ?? '')
@@ -15,7 +16,7 @@ export const useAuthStore = defineStore('auth', () => {
       token.value = response.token
       localStorage.setItem('token', response.token)
     } catch (cause) {
-      error.value = cause instanceof Error ? cause.message : 'Login gagal. Silakan coba lagi.'
+      error.value = getApiErrorMessage(cause, 'Login gagal. Silakan coba lagi.')
       throw cause
     } finally {
       submitting.value = false

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue'
 import { RouterLink, RouterView, useRouter } from 'vue-router'
+import { useMockApi } from '../api/client'
 import { connectRealtime } from '../api/ws'
 import { useAuthStore } from '../stores/auth'
 import { useNodesStore } from '../stores/nodes'
@@ -33,7 +34,7 @@ function logout() {
         </span>
       </RouterLink>
       <div class="topbar-actions">
-        <span class="connection-label"><i></i> Data simulasi aktif</span>
+        <span v-if="useMockApi" class="connection-label"><i></i> Data simulasi aktif</span>
         <button class="button button-quiet logout-button" type="button" @click="logout">Keluar</button>
       </div>
     </header>
@@ -49,7 +50,7 @@ function logout() {
             <span class="nav-icon">⚙</span> Pengaturan
           </RouterLink>
         </nav>
-        <div class="sidebar-note">
+        <div v-if="useMockApi" class="sidebar-note">
           <span class="note-icon">i</span>
           <p>Data saat ini berasal dari simulator lokal.</p>
         </div>
