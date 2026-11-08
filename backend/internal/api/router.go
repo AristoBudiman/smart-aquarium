@@ -52,7 +52,15 @@ func NewServer(
 	r.Post("/api/auth/login", s.handleLogin)
 
 	// Endpoint WebSocket (verifikasi token dari query param ?token=JWT)
-	r.Get("/ws", ws.Handler(s.wsHub, s.authSvc))
+	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
+		hub := s.wsHub
+		if hub == nil {
+			if h, ok := s.broadcaster.(*ws.Hub); ok {
+				hub = h
+			}
+		}
+		ws.Handler(hub, s.authSvc)(w, r)
+	})
 
 	// Endpoint terproteksi JWT
 	r.Group(func(protected chi.Router) {
