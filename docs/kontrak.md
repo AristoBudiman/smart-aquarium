@@ -29,6 +29,7 @@ Backend membandingkan keputusan dengan status aktual terakhir dari topik `state`
 - Simulator memakai format `aq-sim001`.
 - MQTT client ID sama dengan `node_id`, dan setiap node aktif harus unik.
 - Node baru terdaftar otomatis dengan nama `Akuarium {node_id}` dan mode Manual.
+- Setiap node punya kode klaim 8 karakter. Node baru belum punya pemilik sampai diklaim klien.
 - Backend mengirim `config` retained saat mendaftarkan node.
 - Firmware memakai mode Manual sampai `config` diterima.
 
@@ -56,7 +57,10 @@ Backend memakai username MQTT `backend`. Semua node memakai username `node`. ACL
 
 ## REST API
 
-- Semua endpoint kecuali `POST /api/auth/login` dan `GET /api/health` memakai `Authorization: Bearer JWT`.
+- Semua endpoint kecuali `POST /api/auth/login`, `POST /api/auth/register`, dan `GET /api/health` memakai `Authorization: Bearer JWT`.
+- Klaim JWT memuat `uid` (ID user), `sub` (username), dan `adm` (`true` untuk admin). Token lama tanpa `adm` dianggap bukan admin.
+- Semua endpoint `/api/nodes` dan `/api/nodes/{id}/...` hanya berlaku untuk node dengan `owner_id` milik user yang sedang login. `GET /api/nodes` hanya mengembalikan node milik user tersebut (admin mendapat array kosong). Node milik user lain atau belum diklaim menghasilkan `404 {"error":"Node tidak ditemukan"}`.
+- Semua endpoint `/api/admin/...` wajib diakses oleh admin; user non-admin ditolak dengan `403 {"error":"Khusus admin"}`. Admin tidak dapat melihat data sensor, grafik, log, maupun mengendalikan atau mengklaim node klien.
 - Waktu memakai ISO 8601 UTC, misalnya `2026-11-08T03:00:00Z`.
 - Error berbentuk `{"error":"pesan"}`.
 
@@ -64,19 +68,43 @@ Backend memakai username MQTT `backend`. Semua node memakai username `node`. ACL
 | --- | --- | --- |
 | `GET /api/health` | – | `{"status":"ok"}` |
 | `POST /api/auth/login` | `{"username":"","password":""}` | `{"token":""}` |
-| `GET /api/nodes` | – | Array `NodeSummary` |
+| `POST /api/auth/register` | `{"username":"","password":""}` | `201 {"token":""}`, `400` jika tidak valid, `409` jika username sudah dipakai |
+| `GET /api/me` | – | `Me` |
+| `PUT /api/me/telegram` | `{"telegram_chat_id":""}` | `204` |
+| `POST /api/nodes/claim` | `{"node_id":"","claim_code":""}` | `200 NodeDetail`, `403` jika admin, `404` jika node/kode salah, `409` jika milik akun lain, `429` jika >10 gagal/10 menit |
+| `GET /api/nodes` | – | Array `NodeSummary` milik user |
 | `GET /api/nodes/{id}` | – | `NodeDetail` |
 | `PATCH /api/nodes/{id}` | `{"name":""}` | `NodeDetail` |
+| `DELETE /api/nodes/{id}` | – | `204` (lepas kepemilikan, ubah ke mode Manual, `claim_code` tetap) |
 | `GET /api/nodes/{id}/telemetry?from=&to=` | waktu ISO 8601 | Array `{ts,temp,ntu,status}` |
 | `PUT /api/nodes/{id}/mode` | `{"mode":"auto"}` | `NodeDetail` |
 | `PUT /api/nodes/{id}/actuators` | `{"heater":0,"fan":1,"pump":0}` | `202`, atau `409` kalau mode Auto |
 | `GET /api/nodes/{id}/logs` | – | `{"actuators":[...],"alerts":[...]}` |
-| `PUT /api/me/telegram` | `{"telegram_chat_id":""}` | `204` |
+| `GET /api/admin/nodes` | – | Array `AdminNode` (urut `created_at DESC`) |
+| `POST /api/admin/nodes` | `{"node_id":""}` | `201 AdminNode`, `400` jika format salah, `409` jika sudah ada |
+| `POST /api/admin/nodes/{id}/claim-code` | – | `200 AdminNode` dengan `claim_code` baru |
+| `DELETE /api/admin/nodes/{id}/owner` | – | `204` (lepas kepemilikan dan ubah ke mode Manual) |
+| `DELETE /api/admin/nodes/{id}` | – | `204` (hapus node beserta datanya secara cascade) |
 
 Bentuk data:
 
 ```json
 {
+  "Me": {
+    "id": 1,
+    "username": "budi",
+    "is_admin": false,
+    "telegram_linked": true
+  },
+  "AdminNode": {
+    "node_id": "aq-1a2b3c",
+    "name": "Akuarium aq-1a2b3c",
+    "online": true,
+    "last_seen": "2026-11-08T03:00:00Z",
+    "created_at": "2026-11-08T01:00:00Z",
+    "claim_code": "A1B2C3D4",
+    "owner_username": "budi"
+  },
   "NodeSummary": {
     "node_id": "aq-1a2b3c",
     "name": "Akuarium 1",
@@ -134,6 +162,15 @@ Browser tersambung ke `GET /ws?token=JWT`. Server mengirim JSON:
 {"type":"mode","node_id":"aq-1a2b3c","mode":"auto"}
 {"type":"alert","node_id":"aq-1a2b3c","level":"WARNING","message":"Suhu 33,1 °C (WARNING)"}
 ```
+
+Aturan penyaringan event WebSocket:
+- Klien biasa hanya menerima event dari node yang dimilikinya (`owner_id = user_id`).
+- Admin hanya menerima event dengan `type: "node_status"` (baik untuk node yang sudah diklaim maupun node tanpa pemilik), dan tidak menerima event `telemetry`, `state`, `mode`, atau `alert`.
+- Node tanpa pemilik hanya menyiarkan `node_status` ke admin.
+
+## Notifikasi Telegram
+
+Notifikasi Telegram untuk sebuah alert hanya dikirim ke `telegram_chat_id` milik pemilik node (`nodes.owner_id`). Jika node belum diklaim atau pemilik belum mengisi `telegram_chat_id`, alert tetap disimpan di database dan dicatat di log backend.
 
 ## Database
 
@@ -200,6 +237,15 @@ CREATE TABLE alerts (
     sent    BOOLEAN NOT NULL DEFAULT FALSE
 );
 CREATE INDEX alerts_node_ts ON alerts (node_id, ts DESC);
+```
+
+File `db/migrations/002_akun.sql` menambahkan dukungan peran admin (`users.is_admin`), kepemilikan node (`nodes.owner_id`), dan kode klaim 8 karakter (`nodes.claim_code`):
+
+```sql
+ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE nodes ADD COLUMN owner_id BIGINT REFERENCES users (id) ON DELETE SET NULL;
+ALTER TABLE nodes ADD COLUMN claim_code TEXT NOT NULL DEFAULT upper(substr(md5(random()::text || clock_timestamp()::text), 1, 8));
+CREATE INDEX nodes_owner ON nodes (owner_id);
 ```
 
 ## Variabel lingkungan

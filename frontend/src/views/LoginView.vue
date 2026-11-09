@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { ArrowRight, Droplets, ShieldCheck } from 'lucide-vue-next'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -18,46 +19,80 @@ async function submit() {
   }
   try {
     await auth.login(username.value, password.value)
+    if (auth.isAdmin) {
+      void router.replace({ name: 'admin' })
+      return
+    }
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/nodes'
-    void router.replace(redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/nodes')
+    const safeRedirect =
+      redirect.startsWith('/') && !redirect.startsWith('//') && !redirect.startsWith('/admin')
+        ? redirect
+        : '/nodes'
+    void router.replace(safeRedirect)
   } catch {
-    // Pesan kegagalan sudah disimpan oleh auth store.
+    // Error disimpan di store auth.
   }
 }
 </script>
 
 <template>
   <main class="login-page">
-    <div class="login-decoration decoration-one"></div>
-    <div class="login-decoration decoration-two"></div>
+    <div class="login-decoration decoration-one" aria-hidden="true"></div>
+    <div class="login-decoration decoration-two" aria-hidden="true"></div>
     <section class="login-panel">
       <RouterLink class="brand login-brand" to="/login">
-        <span class="brand-mark">A</span>
+        <span class="brand-mark" aria-hidden="true">
+          <Droplets :size="22" :stroke-width="2.2" />
+        </span>
         <span>
           <strong>AquaSense</strong>
           <small>SMART AQUARIUM</small>
         </span>
       </RouterLink>
-      <p class="eyebrow">DASHBOARD MONITORING</p>
-      <h1>Selamat datang</h1>
-      <p class="muted login-intro">Masuk untuk memantau kondisi akuarium Anda.</p>
+      <p class="eyebrow">DASHBOARD PEMANTAUAN</p>
+      <h1>Selamat datang kembali</h1>
+      <p class="muted login-intro">Masuk untuk memantau kualitas air dan kendali akuarium Anda.</p>
 
       <form class="login-form" @submit.prevent="submit">
         <label for="username">Username</label>
-        <input id="username" v-model="username" autocomplete="username" placeholder="Masukkan username" required>
+        <input
+          id="username"
+          v-model="username"
+          autocomplete="username"
+          placeholder="Masukkan username"
+          required
+        />
+
         <label for="password">Kata sandi</label>
-        <input id="password" v-model="password" type="password" autocomplete="current-password" placeholder="Masukkan kata sandi" required>
+        <input
+          id="password"
+          v-model="password"
+          type="password"
+          autocomplete="current-password"
+          placeholder="Masukkan kata sandi"
+          required
+        />
+
         <p v-if="validationError || auth.error" class="form-error" role="alert">
           {{ validationError || auth.error }}
         </p>
+
         <button class="button button-primary login-submit" type="submit" :disabled="auth.submitting">
-          {{ auth.submitting ? 'Memproses...' : 'Masuk ke dashboard' }}
-          <span aria-hidden="true">→</span>
+          <span>{{ auth.submitting ? 'Memproses...' : 'Masuk ke dashboard' }}</span>
+          <ArrowRight :size="18" aria-hidden="true" />
         </button>
       </form>
 
-      <p class="login-footnote"><span class="secure-dot"></span> Koneksi lokal dengan autentikasi JWT</p>
+      <p class="auth-switch-text">
+        Belum punya akun klien?
+        <RouterLink to="/register" class="auth-switch-link">Daftar akun baru</RouterLink>
+      </p>
+
+      <p class="login-footnote">
+        <ShieldCheck :size="16" class="secure-icon" aria-hidden="true" />
+        <span>Koneksi terenkripsi dengan autentikasi JWT</span>
+      </p>
     </section>
-    <footer class="login-footer">AI Smart Aquarium <span>·</span> Sistem pemantauan kualitas air</footer>
+    <footer class="login-footer">AquaSense · Sistem pemantauan kualitas air cerdas</footer>
   </main>
 </template>

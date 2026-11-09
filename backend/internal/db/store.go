@@ -287,16 +287,20 @@ func (s *Store) MarkAlertSent(ctx context.Context, id int64) error {
 	return nil
 }
 
-// TelegramChatIDs mengambil daftar seluruh telegram_chat_id aktif milik pengguna dari tabel users.
-func (s *Store) TelegramChatIDs(ctx context.Context) ([]string, error) {
+// TelegramChatIDs mengambil daftar telegram_chat_id pemilik node dari tabel nodes dan users.
+// Mengembalikan slice kosong jika node belum diklaim atau pemilik belum mengisi chat ID.
+func (s *Store) TelegramChatIDs(ctx context.Context, nodeID string) ([]string, error) {
 	const query = `
-		SELECT DISTINCT telegram_chat_id
-		FROM users
-		WHERE telegram_chat_id IS NOT NULL AND telegram_chat_id != '';
+		SELECT u.telegram_chat_id
+		FROM nodes n
+		JOIN users u ON u.id = n.owner_id
+		WHERE n.node_id = $1
+		  AND u.telegram_chat_id IS NOT NULL
+		  AND u.telegram_chat_id != '';
 	`
-	rows, err := s.pool.Query(ctx, query)
+	rows, err := s.pool.Query(ctx, query, nodeID)
 	if err != nil {
-		return nil, fmt.Errorf("db TelegramChatIDs query: %w", err)
+		return nil, fmt.Errorf("db TelegramChatIDs query (%s): %w", nodeID, err)
 	}
 	defer rows.Close()
 
@@ -304,13 +308,13 @@ func (s *Store) TelegramChatIDs(ctx context.Context) ([]string, error) {
 	for rows.Next() {
 		var chatID string
 		if err := rows.Scan(&chatID); err != nil {
-			return nil, fmt.Errorf("db TelegramChatIDs scan: %w", err)
+			return nil, fmt.Errorf("db TelegramChatIDs scan (%s): %w", nodeID, err)
 		}
 		ids = append(ids, chatID)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("db TelegramChatIDs rows: %w", err)
+		return nil, fmt.Errorf("db TelegramChatIDs rows (%s): %w", nodeID, err)
 	}
 
 	return ids, nil

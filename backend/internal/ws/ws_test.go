@@ -138,3 +138,94 @@ func TestHubSlowConsumerEviction(t *testing.T) {
 		t.Errorf("klien lambat harus dikeluarkan dari hub, sisa: %d", hub.ClientCount())
 	}
 }
+
+type fakeOwnerResolver struct {
+	owners map[string]int64
+}
+
+func (f *fakeOwnerResolver) NodeOwner(_ context.Context, nodeID string) (int64, bool, error) {
+	ownerID, ok := f.owners[nodeID]
+	return ownerID, ok, nil
+}
+
+func TestHubPublishOwnershipAndAdminFiltering(t *testing.T) {
+	resolver := &fakeOwnerResolver{
+		owners: map[string]int64{
+			"aq-milik-a": 10,
+			// "aq-tanpa-pemilik" belum diklaim
+		},
+	}
+	hub := ws.NewHub(resolver)
+
+	clientA := ws.NewTestClientWithIdentity(hub, 10, false)
+	clientB := ws.NewTestClientWithIdentity(hub, 20, false)
+	clientAdmin := ws.NewTestClientWithIdentity(hub, 1, true)
+
+	hub.RegisterForTest(clientA)
+	hub.RegisterForTest(clientB)
+	hub.RegisterForTest(clientAdmin)
+
+	// 1. Telemetry untuk aq-milik-a -> hanya diterima oleh clientA (pemilik), B dan Admin tidak menerima
+	hub.Publish(core.TelemetryEvent{
+		Type:   "telemetry",
+		NodeID: "aq-milik-a",
+		TS:     time.Now().UTC(),
+		Temp:   27.5,
+		NTU:    10.0,
+	})
+
+	if len(ws.SendChanForTest(clientA)) != 1 {
+		t.Fatalf("clientA (pemilik) seharusnya menerima telemetry, got %d", len(ws.SendChanForTest(clientA)))
+	}
+	<-ws.SendChanForTest(clientA)
+
+	if len(ws.SendChanForTest(clientB)) != 0 {
+		t.Fatalf("clientB (bukan pemilik) tidak boleh menerima telemetry node A")
+	}
+	if len(ws.SendChanForTest(clientAdmin)) != 0 {
+		t.Fatalf("admin tidak boleh menerima telemetry node klien")
+	}
+
+	// 2. node_status untuk aq-milik-a -> diterima oleh clientA (pemilik) dan clientAdmin, tetapi bukan clientB
+	hub.Publish(core.NodeStatusEvent{
+		Type:   "node_status",
+		NodeID: "aq-milik-a",
+		Online: true,
+	})
+
+	if len(ws.SendChanForTest(clientA)) != 1 {
+		t.Fatalf("clientA seharusnya menerima node_status miliknya")
+	}
+	<-ws.SendChanForTest(clientA)
+
+	if len(ws.SendChanForTest(clientAdmin)) != 1 {
+		t.Fatalf("admin seharusnya menerima node_status")
+	}
+	<-ws.SendChanForTest(clientAdmin)
+
+	if len(ws.SendChanForTest(clientB)) != 0 {
+		t.Fatalf("clientB tidak boleh menerima node_status node A")
+	}
+
+	// 3. Event untuk node tanpa pemilik (aq-tanpa-pemilik):
+	// telemetry tidak diterima siapa pun; node_status hanya diterima oleh admin.
+	hub.Publish(core.TelemetryEvent{
+		Type:   "telemetry",
+		NodeID: "aq-tanpa-pemilik",
+		TS:     time.Now().UTC(),
+		Temp:   28.0,
+		NTU:    15.0,
+	})
+	hub.Publish(core.NodeStatusEvent{
+		Type:   "node_status",
+		NodeID: "aq-tanpa-pemilik",
+		Online: true,
+	})
+
+	if len(ws.SendChanForTest(clientA)) != 0 || len(ws.SendChanForTest(clientB)) != 0 {
+		t.Fatalf("klien biasa tidak boleh menerima event dari node tanpa pemilik")
+	}
+	if len(ws.SendChanForTest(clientAdmin)) != 1 {
+		t.Fatalf("admin seharusnya hanya menerima 1 event (node_status) dari node tanpa pemilik, got %d", len(ws.SendChanForTest(clientAdmin)))
+	}
+}

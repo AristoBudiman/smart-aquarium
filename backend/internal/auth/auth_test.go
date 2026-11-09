@@ -158,3 +158,74 @@ func TestMiddleware(t *testing.T) {
 		t.Errorf("got username %v, want john_doe", res["username"])
 	}
 }
+
+func TestAdminClaimAndLegacyTokenWithoutAdm(t *testing.T) {
+	svc, err := auth.NewService(testSecret)
+	if err != nil {
+		t.Fatalf("gagal membuat service: %v", err)
+	}
+
+	adminToken, err := svc.Sign(1, "admin", true)
+	if err != nil {
+		t.Fatalf("gagal sign token admin: %v", err)
+	}
+	adminClaims, err := svc.Verify(adminToken)
+	if err != nil {
+		t.Fatalf("gagal verify token admin: %v", err)
+	}
+	if !adminClaims.Admin {
+		t.Errorf("adminClaims.Admin = false, want true")
+	}
+
+	// Token lama tanpa field "adm" di JSON dianggap bukan admin
+	now := time.Now().UTC()
+	legacyToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"uid": 7,
+		"sub": "user_lama",
+		"iat": now.Unix(),
+		"exp": now.Add(time.Hour).Unix(),
+	})
+	signedLegacy, err := legacyToken.SignedString([]byte(testSecret))
+	if err != nil {
+		t.Fatalf("gagal sign legacy token: %v", err)
+	}
+	legacyClaims, err := svc.Verify(signedLegacy)
+	if err != nil {
+		t.Fatalf("gagal verify legacy token: %v", err)
+	}
+	if legacyClaims.Admin {
+		t.Errorf("legacyClaims.Admin = true, want false")
+	}
+}
+
+func TestRequireAdminMiddleware(t *testing.T) {
+	svc, _ := auth.NewService(testSecret)
+	handler := svc.Middleware(auth.RequireAdmin(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})))
+
+	// 1. Klien biasa -> 403 {"error":"Khusus admin"}
+	clientToken, _ := svc.Sign(2, "budi", false)
+	req := httptest.NewRequest(http.MethodGet, "/api/admin/nodes", nil)
+	req.Header.Set("Authorization", "Bearer "+clientToken)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-admin got status %d, want 403", rec.Code)
+	}
+	var errRes map[string]string
+	_ = json.NewDecoder(rec.Body).Decode(&errRes)
+	if errRes["error"] != "Khusus admin" {
+		t.Errorf("got error %q, want %q", errRes["error"], "Khusus admin")
+	}
+
+	// 2. Admin -> 200 OK
+	adminToken, _ := svc.Sign(1, "admin", true)
+	req = httptest.NewRequest(http.MethodGet, "/api/admin/nodes", nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("admin got status %d, want 200", rec.Code)
+	}
+}

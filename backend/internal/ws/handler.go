@@ -18,11 +18,16 @@ func Handler(hub *Hub, authSvc *auth.Service) http.HandlerFunc {
 			return
 		}
 
+		var userID int64
+		var isAdmin bool
 		if authSvc != nil {
-			if _, err := authSvc.Verify(token); err != nil {
+			claims, err := authSvc.Verify(token)
+			if err != nil {
 				writeUnauthorized(w, "token tidak valid atau telah kedaluwarsa")
 				return
 			}
+			userID = claims.UserID
+			isAdmin = claims.Admin
 		}
 
 		if hub == nil {
@@ -42,7 +47,7 @@ func Handler(hub *Hub, authSvc *auth.Service) http.HandlerFunc {
 			return
 		}
 
-		client := newClient(hub, conn)
+		client := newClient(hub, conn, userID, isAdmin)
 		hub.register(client)
 
 		ctx := r.Context()

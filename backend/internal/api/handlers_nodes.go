@@ -5,11 +5,18 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/AristoBudiman/smart-aquarium/backend/internal/auth"
 	"github.com/AristoBudiman/smart-aquarium/backend/internal/core"
 	"github.com/AristoBudiman/smart-aquarium/backend/internal/db"
 	"github.com/go-chi/chi/v5"
 )
+
+type claimNodeRequest struct {
+	NodeID    string `json:"node_id"`
+	ClaimCode string `json:"claim_code"`
+}
 
 type updateNameRequest struct {
 	Name string `json:"name"`
@@ -25,13 +32,120 @@ type setActuatorsRequest struct {
 	Pump   *int `json:"pump"`
 }
 
-func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
-	if s.store == nil {
+func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.FromContext(r.Context())
+	if !ok || claims == nil {
+		writeError(w, http.StatusUnauthorized, "tidak terautentikasi")
+		return
+	}
+
+	if claims.Admin {
+		writeError(w, http.StatusForbidden, "Admin tidak dapat mengklaim akuarium")
+		return
+	}
+
+	now := time.Now().UTC()
+	if s.isClaimRateLimited(claims.UserID, now) {
+		writeError(w, http.StatusTooManyRequests, "Terlalu banyak percobaan, coba lagi nanti")
+		return
+	}
+
+	var req claimNodeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "format JSON tidak valid")
+		return
+	}
+
+	if !s.hasStore() {
 		writeError(w, http.StatusInternalServerError, "basis data belum diinisialisasi")
 		return
 	}
 
-	nodes, err := s.store.ListNodeSummaries(r.Context())
+	nodeID := strings.TrimSpace(req.NodeID)
+	claimCode := strings.TrimSpace(req.ClaimCode)
+	if nodeID == "" || claimCode == "" {
+		s.recordClaimFailure(claims.UserID, now)
+		writeError(w, http.StatusNotFound, "ID node atau kode klaim salah")
+		return
+	}
+
+	detail, err := s.store.ClaimNode(r.Context(), claims.UserID, nodeID, claimCode)
+	if err != nil {
+		if errors.Is(err, db.ErrInvalidClaim) {
+			s.recordClaimFailure(claims.UserID, now)
+			writeError(w, http.StatusNotFound, "ID node atau kode klaim salah")
+			return
+		}
+		if errors.Is(err, db.ErrNodeAlreadyClaimed) {
+			s.recordClaimFailure(claims.UserID, now)
+			writeError(w, http.StatusConflict, "Akuarium sudah terdaftar di akun lain")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "gagal mengklaim akuarium")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, detail)
+}
+
+func (s *Server) handleDeleteNode(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.FromContext(r.Context())
+	if !ok || claims == nil {
+		writeError(w, http.StatusUnauthorized, "tidak terautentikasi")
+		return
+	}
+
+	nodeID := chi.URLParam(r, "id")
+	if nodeID == "" {
+		writeError(w, http.StatusBadRequest, "node_id tidak valid")
+		return
+	}
+
+	if !s.hasStore() {
+		writeError(w, http.StatusInternalServerError, "basis data belum diinisialisasi")
+		return
+	}
+
+	if err := s.store.ReleaseNodeOwnership(r.Context(), claims.UserID, nodeID); err != nil {
+		if errors.Is(err, db.ErrNodeNotFound) {
+			writeError(w, http.StatusNotFound, "Node tidak ditemukan")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "gagal melepas kepemilikan akuarium")
+		return
+	}
+
+	if s.commander != nil {
+		if err := s.commander.SetMode(r.Context(), nodeID, core.ModeManual); err != nil {
+			writeError(w, http.StatusInternalServerError, "gagal mengirim perintah mode ke node")
+			return
+		}
+	}
+
+	if s.broadcaster != nil {
+		s.broadcaster.Publish(core.ModeEvent{
+			Type:   "mode",
+			NodeID: nodeID,
+			Mode:   core.ModeManual,
+		})
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.FromContext(r.Context())
+	if !ok || claims == nil {
+		writeError(w, http.StatusUnauthorized, "tidak terautentikasi")
+		return
+	}
+
+	if !s.hasStore() {
+		writeError(w, http.StatusInternalServerError, "basis data belum diinisialisasi")
+		return
+	}
+
+	nodes, err := s.store.ListNodeSummaries(r.Context(), claims.UserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "gagal mengambil daftar akuarium")
 		return
@@ -40,21 +154,27 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.FromContext(r.Context())
+	if !ok || claims == nil {
+		writeError(w, http.StatusUnauthorized, "tidak terautentikasi")
+		return
+	}
+
 	nodeID := chi.URLParam(r, "id")
 	if nodeID == "" {
 		writeError(w, http.StatusBadRequest, "node_id tidak valid")
 		return
 	}
 
-	if s.store == nil {
+	if !s.hasStore() {
 		writeError(w, http.StatusInternalServerError, "basis data belum diinisialisasi")
 		return
 	}
 
-	detail, err := s.store.GetNodeDetail(r.Context(), nodeID)
+	detail, err := s.store.GetNodeDetail(r.Context(), claims.UserID, nodeID)
 	if err != nil {
 		if errors.Is(err, db.ErrNodeNotFound) {
-			writeError(w, http.StatusNotFound, "akuarium tidak ditemukan")
+			writeError(w, http.StatusNotFound, "Node tidak ditemukan")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "gagal mengambil detail akuarium")
@@ -65,6 +185,12 @@ func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePatchNode(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.FromContext(r.Context())
+	if !ok || claims == nil {
+		writeError(w, http.StatusUnauthorized, "tidak terautentikasi")
+		return
+	}
+
 	nodeID := chi.URLParam(r, "id")
 	if nodeID == "" {
 		writeError(w, http.StatusBadRequest, "node_id tidak valid")
@@ -83,15 +209,15 @@ func (s *Server) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.store == nil {
+	if !s.hasStore() {
 		writeError(w, http.StatusInternalServerError, "basis data belum diinisialisasi")
 		return
 	}
 
-	detail, err := s.store.UpdateNodeName(r.Context(), nodeID, name)
+	detail, err := s.store.UpdateNodeName(r.Context(), claims.UserID, nodeID, name)
 	if err != nil {
 		if errors.Is(err, db.ErrNodeNotFound) {
-			writeError(w, http.StatusNotFound, "akuarium tidak ditemukan")
+			writeError(w, http.StatusNotFound, "Node tidak ditemukan")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "gagal memperbarui nama akuarium")
@@ -102,6 +228,12 @@ func (s *Server) handlePatchNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUpdateMode(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.FromContext(r.Context())
+	if !ok || claims == nil {
+		writeError(w, http.StatusUnauthorized, "tidak terautentikasi")
+		return
+	}
+
 	nodeID := chi.URLParam(r, "id")
 	if nodeID == "" {
 		writeError(w, http.StatusBadRequest, "node_id tidak valid")
@@ -120,16 +252,16 @@ func (s *Server) handleUpdateMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.store == nil {
+	if !s.hasStore() {
 		writeError(w, http.StatusInternalServerError, "basis data belum diinisialisasi")
 		return
 	}
 
 	mode := core.Mode(modeStr)
-	detail, err := s.store.UpdateNodeMode(r.Context(), nodeID, mode)
+	detail, err := s.store.UpdateNodeMode(r.Context(), claims.UserID, nodeID, mode)
 	if err != nil {
 		if errors.Is(err, db.ErrNodeNotFound) {
-			writeError(w, http.StatusNotFound, "akuarium tidak ditemukan")
+			writeError(w, http.StatusNotFound, "Node tidak ditemukan")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "gagal memperbarui mode akuarium")
@@ -155,6 +287,12 @@ func (s *Server) handleUpdateMode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSetActuators(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.FromContext(r.Context())
+	if !ok || claims == nil {
+		writeError(w, http.StatusUnauthorized, "tidak terautentikasi")
+		return
+	}
+
 	nodeID := chi.URLParam(r, "id")
 	if nodeID == "" {
 		writeError(w, http.StatusBadRequest, "node_id tidak valid")
@@ -179,15 +317,15 @@ func (s *Server) handleSetActuators(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.store == nil {
+	if !s.hasStore() {
 		writeError(w, http.StatusInternalServerError, "basis data belum diinisialisasi")
 		return
 	}
 
-	detail, err := s.store.GetNodeDetail(r.Context(), nodeID)
+	detail, err := s.store.GetNodeDetail(r.Context(), claims.UserID, nodeID)
 	if err != nil {
 		if errors.Is(err, db.ErrNodeNotFound) {
-			writeError(w, http.StatusNotFound, "akuarium tidak ditemukan")
+			writeError(w, http.StatusNotFound, "Node tidak ditemukan")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "gagal memeriksa status node")

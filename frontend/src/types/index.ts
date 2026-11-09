@@ -2,6 +2,23 @@ export type StatusClass = 'NORMAL' | 'CAUTION' | 'WARNING' | 'SEVERE'
 export type NodeMode = 'auto' | 'manual'
 export type ActuatorValue = 0 | 1 | null
 
+export interface Me {
+  id: number
+  username: string
+  is_admin: boolean
+  telegram_linked: boolean
+}
+
+export interface AdminNode {
+  node_id: string
+  name: string
+  online: boolean
+  last_seen: string | null
+  created_at: string
+  claim_code: string
+  owner_username: string | null
+}
+
 export interface NodeSummary {
   node_id: string
   name: string

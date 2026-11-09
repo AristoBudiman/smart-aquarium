@@ -58,7 +58,7 @@ func main() {
 		log.Fatalf("gagal menginisialisasi akun admin: %v", err)
 	}
 
-	hub := ws.NewHub()
+	hub := ws.NewHub(store)
 	notifier := notify.New(store, telegramBotToken)
 
 	mqttCfg := mqtt.Config{

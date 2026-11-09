@@ -16,6 +16,7 @@ const TokenDuration = 24 * time.Hour
 type Claims struct {
 	UserID   int64  `json:"uid"`
 	Username string `json:"sub"`
+	Admin    bool   `json:"adm"`
 	jwt.RegisteredClaims
 }
 
@@ -33,11 +34,13 @@ func NewService(secret string) (*Service, error) {
 }
 
 // Sign membuat dan menandatangani token JWT HS256 baru yang berlaku selama 24 jam.
-func (s *Service) Sign(userID int64, username string) (string, error) {
+func (s *Service) Sign(userID int64, username string, isAdmin ...bool) (string, error) {
+	admin := len(isAdmin) > 0 && isAdmin[0]
 	now := time.Now().UTC()
 	claims := Claims{
 		UserID:   userID,
 		Username: username,
+		Admin:    admin,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   username,
 			IssuedAt:  jwt.NewNumericDate(now),
