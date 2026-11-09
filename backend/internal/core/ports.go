@@ -109,7 +109,7 @@ type Store interface {
 	LogActuators(ctx context.Context, nodeID string, a Actuators, source Source) error
 	SaveAlert(ctx context.Context, a Alert) (id int64, err error)
 	MarkAlertSent(ctx context.Context, id int64) error
-	TelegramChatIDs(ctx context.Context) ([]string, error)
+	TelegramChatIDs(ctx context.Context, nodeID string) ([]string, error)
 }
 
 // Commander diimplementasikan Peran 3 di internal/mqtt dan dipakai Peran 4.
@@ -157,4 +157,3 @@ type AlertEvent struct {
 	Level   Class  `json:"level"`
 	Message string `json:"message"`
 }
-

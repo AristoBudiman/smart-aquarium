@@ -55,9 +55,39 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 	})
 }
 
+// RequireAdmin memastikan pengguna yang terautentikasi memiliki hak akses admin.
+// Mengembalikan 403 {"error":"Khusus admin"} jika bukan admin.
+func RequireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims, ok := FromContext(r.Context())
+		if !ok || claims == nil {
+			writeUnauthorized(w, "tidak terautentikasi")
+			return
+		}
+		if !claims.Admin {
+			writeForbidden(w, "Khusus admin")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RequireAdmin adalah method pembantu pada Service yang memanggil RequireAdmin.
+func (s *Service) RequireAdmin(next http.Handler) http.Handler {
+	return RequireAdmin(next)
+}
+
 func writeUnauthorized(w http.ResponseWriter, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error": message,
+	})
+}
+
+func writeForbidden(w http.ResponseWriter, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error": message,
 	})

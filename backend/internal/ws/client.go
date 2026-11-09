@@ -17,15 +17,19 @@ const (
 type Client struct {
 	hub       *Hub
 	conn      *websocket.Conn
+	userID    int64
+	isAdmin   bool
 	send      chan []byte
 	closeOnce sync.Once
 }
 
-func newClient(hub *Hub, conn *websocket.Conn) *Client {
+func newClient(hub *Hub, conn *websocket.Conn, userID int64, isAdmin bool) *Client {
 	return &Client{
-		hub:  hub,
-		conn: conn,
-		send: make(chan []byte, queueSize),
+		hub:     hub,
+		conn:    conn,
+		userID:  userID,
+		isAdmin: isAdmin,
+		send:    make(chan []byte, queueSize),
 	}
 }
 

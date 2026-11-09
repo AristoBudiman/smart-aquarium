@@ -1,12 +1,14 @@
 ### Smart Aquarium - REST API & WebSocket Test Requests
 ### Panduan:
-### 1. Jalankan request Login untuk mendapatkan JWT token.
-### 2. Salin token dari respon ke variabel @token di bawah.
-### 3. Gunakan request lainnya dengan token tersebut.
+### 1. Jalankan request Register (untuk akun klien) atau Login (untuk admin/klien) guna mendapatkan JWT token.
+### 2. Salin token dari respon ke variabel @token atau @adminToken di bawah.
+### 3. Gunakan request lainnya sesuai hak akses token tersebut.
 
 @baseUrl = http://localhost:8080
-@token = tempel_token_jwt_di_sini
+@token = tempel_token_klien_di_sini
+@adminToken = tempel_token_admin_di_sini
 @nodeId = aq-sim001
+@claimCode = A1B2C3D4
 
 ### 1. Health Check (Publik)
 GET {{baseUrl}}/api/health
@@ -14,8 +16,20 @@ Accept: application/json
 
 ###
 
-### 2. Login (Publik)
-# Ganti username dan password dengan kredensial ADMIN_USERNAME & ADMIN_PASSWORD dari .env
+### 2. Register Akun Klien Baru (Publik)
+# Username: 3-32 karakter (a-z, 0-9, _, ., -), Password: minimal 8 karakter.
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "budi",
+  "password": "ganti_password_klien"
+}
+
+###
+
+### 3. Login (Publik - Admin atau Klien)
+# Ganti username dan password sesuai akun klien atau ADMIN_USERNAME & ADMIN_PASSWORD dari .env
 POST {{baseUrl}}/api/auth/login
 Content-Type: application/json
 
@@ -26,21 +40,51 @@ Content-Type: application/json
 
 ###
 
-### 3. Daftar Seluruh Node (Summary)
+### 4. Profil Pengguna Saat Ini (Me)
+GET {{baseUrl}}/api/me
+Authorization: Bearer {{token}}
+Accept: application/json
+
+###
+
+### 5. Perbarui Telegram Chat ID Pengguna
+PUT {{baseUrl}}/api/me/telegram
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "telegram_chat_id": "123456789"
+}
+
+###
+
+### 6. Klaim Kepemilikan Node (Khusus Klien)
+POST {{baseUrl}}/api/nodes/claim
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "node_id": "{{nodeId}}",
+  "claim_code": "{{claimCode}}"
+}
+
+###
+
+### 7. Daftar Node Milik Klien (Summary)
 GET {{baseUrl}}/api/nodes
 Authorization: Bearer {{token}}
 Accept: application/json
 
 ###
 
-### 4. Detail Node Spesifik
+### 8. Detail Node Milik Klien
 GET {{baseUrl}}/api/nodes/{{nodeId}}
 Authorization: Bearer {{token}}
 Accept: application/json
 
 ###
 
-### 5. Ubah Nama Node (Rename)
+### 9. Ubah Nama Node (Rename)
 PATCH {{baseUrl}}/api/nodes/{{nodeId}}
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -51,7 +95,7 @@ Content-Type: application/json
 
 ###
 
-### 6. Riwayat Telemetry (Rentang Waktu ISO 8601 UTC)
+### 10. Riwayat Telemetry (Rentang Waktu ISO 8601 UTC)
 # Rentang <= 48 jam mengembalikan data mentah.
 # Rentang > 48 jam mengembalikan data rata-rata per jam via date_bin.
 GET {{baseUrl}}/api/nodes/{{nodeId}}/telemetry?from=2026-11-06T00:00:00Z&to=2026-11-08T00:00:00Z
@@ -60,7 +104,7 @@ Accept: application/json
 
 ###
 
-### 7. Ubah Mode Pengoperasian Node ('auto' atau 'manual')
+### 11. Ubah Mode Pengoperasian Node ('auto' atau 'manual')
 PUT {{baseUrl}}/api/nodes/{{nodeId}}/mode
 Authorization: Bearer {{token}}
 Content-Type: application/json
@@ -71,7 +115,7 @@ Content-Type: application/json
 
 ###
 
-### 8. Kendali Aktuator Manual (Hanya Diizinkan Pada Mode Manual)
+### 12. Kendali Aktuator Manual (Hanya Diizinkan Pada Mode Manual)
 # Mengembalikan 202 Accepted jika berhasil, atau 409 Conflict jika mode Auto.
 PUT {{baseUrl}}/api/nodes/{{nodeId}}/actuators
 Authorization: Bearer {{token}}
@@ -85,24 +129,57 @@ Content-Type: application/json
 
 ###
 
-### 9. Log Riwayat Aktuator dan Alert
+### 13. Log Riwayat Aktuator dan Alert
 GET {{baseUrl}}/api/nodes/{{nodeId}}/logs
 Authorization: Bearer {{token}}
 Accept: application/json
 
 ###
 
-### 10. Perbarui Telegram Chat ID Pengguna
-PUT {{baseUrl}}/api/me/telegram
+### 14. Lepas Kepemilikan Node oleh Klien
+DELETE {{baseUrl}}/api/nodes/{{nodeId}}
 Authorization: Bearer {{token}}
+
+###
+
+### 15. [ADMIN] Daftar Seluruh Node beserta Kode Klaim
+GET {{baseUrl}}/api/admin/nodes
+Authorization: Bearer {{adminToken}}
+Accept: application/json
+
+###
+
+### 16. [ADMIN] Daftarkan Node Baru
+# Format node_id: ^aq-[0-9a-f]{6}$ atau ^aq-sim[0-9]{3}$
+POST {{baseUrl}}/api/admin/nodes
+Authorization: Bearer {{adminToken}}
 Content-Type: application/json
 
 {
-  "telegram_chat_id": "123456789"
+  "node_id": "aq-1a2b3c"
 }
 
 ###
 
-### 11. WebSocket Connection (Browser / WS Client)
+### 17. [ADMIN] Buat Ulang Kode Klaim Node
+POST {{baseUrl}}/api/admin/nodes/{{nodeId}}/claim-code
+Authorization: Bearer {{adminToken}}
+Accept: application/json
+
+###
+
+### 18. [ADMIN] Lepas Kepemilikan Node Klien
+DELETE {{baseUrl}}/api/admin/nodes/{{nodeId}}/owner
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 19. [ADMIN] Hapus Node Beserta Seluruh Datanya (Cascade)
+DELETE {{baseUrl}}/api/admin/nodes/{{nodeId}}
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 20. WebSocket Connection (Browser / WS Client)
 # Gunakan query param token:
 # ws://localhost:8080/ws?token={{token}}

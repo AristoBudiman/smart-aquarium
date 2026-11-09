@@ -89,9 +89,13 @@ func (s *Service) sendAsync(alert core.Alert, text string) {
 		return
 	}
 
-	chatIDs, err := s.store.TelegramChatIDs(ctx)
+	chatIDs, err := s.store.TelegramChatIDs(ctx, alert.NodeID)
 	if err != nil {
-		log.Printf("notify: gagal ambil daftar chat_id: %v", err)
+		log.Printf("notify: gagal ambil daftar chat_id untuk node %s: %v", alert.NodeID, err)
+		return
+	}
+	if len(chatIDs) == 0 {
+		log.Printf("notify: tidak ada penerima telegram untuk node %s: %s", alert.NodeID, text)
 		return
 	}
 
