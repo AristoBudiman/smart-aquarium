@@ -20,6 +20,7 @@
 
 #define SENSOR_READ_INTERVAL_MS  2000UL
 #define DS18B20_CONV_WAIT_MS     800UL
+#define TEMP_INVALID_CUTOFF_MS   10000UL
 #define TURB_SAMPLE_COUNT        20
 #define TURB_SAMPLE_INTERVAL_MS  20UL
 #define MQTT_RETRY_INTERVAL_MS   5000UL
@@ -61,6 +62,8 @@ int turbSampleIndex = 0;
 bool firstTempReadAfterBoot = true;
 bool hasSensorReading = false;
 bool latestTempValid = false;
+bool tempInvalidActive = false;
+unsigned long tempInvalidSinceMs = 0;
 float latestTemp = DEVICE_DISCONNECTED_C;
 int latestRawTurb = 0;
 float latestVoltage = 0.0f;
@@ -208,7 +211,7 @@ void publishTelemetry() {
   }
 }
 
-void applyFailsafeRelays() {
+bool applyFailsafeRelays() {
   bool targetHeater = false;
   bool targetFan = false;
   bool targetPump = false;
@@ -230,7 +233,9 @@ void applyFailsafeRelays() {
     Serial.println("[Fail-safe] Relay disesuaikan oleh aturan lokal fail-safe:");
     printRelayState();
     publishState();
+    return true;
   }
+  return false;
 }
 
 void evaluateFailsafe() {
@@ -257,14 +262,30 @@ void evaluateFailsafe() {
     } else {
       Serial.println("Heartbeat server hilang > 180 detik");
     }
-    applyFailsafeRelays();
-    publishState();
+    if (!applyFailsafeRelays()) {
+      publishState();
+    }
   } else if (!shouldFailsafe && failsafeActive) {
     failsafeActive = false;
     Serial.println("[Fail-safe] PULIH! Kembali mengikuti server");
     publishState();
   } else if (failsafeActive) {
     applyFailsafeRelays();
+  }
+}
+
+// Mode Manual tidak diubah: pengguna tetap memegang kendali penuh atas relay.
+void enforceTempSensorCutoff() {
+  if (!isAutoMode || failsafeActive || !tempInvalidActive) {
+    return;
+  }
+
+  if ((millis() - tempInvalidSinceMs) >= TEMP_INVALID_CUTOFF_MS) {
+    if (stateHeater || stateFan) {
+      applyRelays(false, false, statePump);
+      Serial.println("[Sensor] DS18B20 tidak terbaca > 10 dtk: pemanas & kipas dimatikan");
+      publishState();
+    }
   }
 }
 
@@ -302,6 +323,13 @@ void handleCmdMessage(const byte* payload, unsigned int length) {
     targetPump = (doc["pump"].as<int>() != 0);
   } else if (doc["pump"].is<bool>()) {
     targetPump = doc["pump"].as<bool>();
+  }
+
+  // Mode Manual tidak dibatasi: pengguna tetap memegang kendali penuh.
+  if (isAutoMode && hasSensorReading && !latestTempValid) {
+    targetHeater = false;
+    targetFan = false;
+    Serial.println("[MQTT] Mode AUTO & sensor suhu gagal: pemanas & kipas dipaksa OFF, pompa mengikuti cmd");
   }
 
   applyRelays(targetHeater, targetFan, targetPump);
@@ -467,12 +495,17 @@ void updateSensorsNonBlocking() {
     bool skippedFirst85 = false;
     if (suhu == DEVICE_DISCONNECTED_C) {
       valid = false;
+      if (!tempInvalidActive) {
+        tempInvalidActive = true;
+        tempInvalidSinceMs = now;
+      }
     } else if (firstTempReadAfterBoot && fabs(suhu - 85.0f) < 0.01f) {
       valid = false;
       skippedFirst85 = true;
       firstTempReadAfterBoot = false;
     } else {
       firstTempReadAfterBoot = false;
+      tempInvalidActive = false;
     }
 
     latestTempValid = valid;
@@ -686,7 +719,7 @@ void setup() {
   initNodeIdentity();
 
   Serial.println();
-  Serial.println("=== Smart Aquarium - Firmware Lengkap (Tahap 1-7) ===");
+  Serial.println("=== Smart Aquarium - Firmware Lengkap (Tahap 1-7 + sensor cutoff) ===");
   Serial.print("Node ID : ");
   Serial.println(nodeId);
   Serial.print("Jumlah DS18B20 terdeteksi: ");
@@ -714,6 +747,7 @@ void loop() {
   handleSerialCommand();
   updateSensorsNonBlocking();
   evaluateFailsafe();
+  enforceTempSensorCutoff();
 
   unsigned long now = millis();
   if (mqttClient.connected()) {
