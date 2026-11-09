@@ -115,9 +115,9 @@ async function confirmUnclaim() {
 <template>
   <section class="page">
     <PageHeader
-      eyebrow="PREFERENSI AKUN & PERANGKAT"
+      eyebrow="PREFERENSI AKUN & AKUARIUM"
       title="Pengaturan"
-      subtitle="Kelola profil akun, notifikasi Telegram, dan perangkat akuarium Anda."
+      subtitle="Kelola profil akun, notifikasi Telegram, dan akuarium Anda."
     />
 
     <PageFeedback :loading="loading" :error="loadError">
@@ -147,7 +147,7 @@ async function confirmUnclaim() {
         <article class="panel settings-panel">
           <div class="panel-heading">
             <div>
-              <p class="eyebrow">IDENTITAS PERANGKAT</p>
+              <p class="eyebrow">IDENTITAS AKUARIUM</p>
               <h2>Nama &amp; kepemilikan akuarium</h2>
             </div>
             <span class="settings-icon" aria-hidden="true">
@@ -156,7 +156,7 @@ async function confirmUnclaim() {
           </div>
 
           <p class="muted settings-description">
-            Ubah nama tampilan akuarium pada dashboard atau lepas perangkat dari akun Anda.
+            Ubah nama tampilan akuarium pada dashboard atau lepas akuarium dari akun Anda.
           </p>
 
           <template v-if="store.nodes.length">

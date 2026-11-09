@@ -1,8 +1,7 @@
-import { useMockApi } from './client'
-import { nextMockRealtimeEvent } from './mock'
 import type { ActuatorValue, NodeMode, RealtimeEvent, StatusClass } from '../types'
 
 const reconnectLimitMs = 30_000
+const isMock = import.meta.env.VITE_MOCK === '1'
 
 function isStatusClass(value: unknown): value is StatusClass {
   return value === 'NORMAL' || value === 'CAUTION' || value === 'WARNING' || value === 'SEVERE'
@@ -76,12 +75,20 @@ function parseEvent(data: string): RealtimeEvent | null {
 }
 
 export function connectRealtime(onEvent: (event: RealtimeEvent) => void): () => void {
-  if (useMockApi) {
-    const timer = window.setInterval(() => {
-      const event = nextMockRealtimeEvent()
-      if (event) onEvent(event)
-    }, 2_500)
-    return () => window.clearInterval(timer)
+  if (isMock) {
+    let timer: number | undefined
+    let cancelled = false
+    void import('./mock').then(({ nextMockRealtimeEvent }) => {
+      if (cancelled) return
+      timer = window.setInterval(() => {
+        const event = nextMockRealtimeEvent()
+        if (event) onEvent(event)
+      }, 2_500)
+    })
+    return () => {
+      cancelled = true
+      if (timer !== undefined) window.clearInterval(timer)
+    }
   }
 
   let socket: WebSocket | null = null

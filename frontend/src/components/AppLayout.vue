@@ -82,7 +82,7 @@ function logout() {
           <template v-else>
             <RouterLink to="/nodes" class="nav-link" active-class="is-active">
               <LayoutGrid :size="19" aria-hidden="true" />
-              <span>Daftar Node</span>
+              <span>Daftar Akuarium</span>
             </RouterLink>
             <RouterLink to="/settings" class="nav-link" active-class="is-active">
               <Settings :size="19" aria-hidden="true" />
@@ -116,7 +116,7 @@ function logout() {
       <template v-else>
         <RouterLink to="/nodes" class="mobile-nav-link" active-class="is-active">
           <LayoutGrid :size="20" aria-hidden="true" />
-          <span>Node</span>
+          <span>Akuarium</span>
         </RouterLink>
         <RouterLink to="/settings" class="mobile-nav-link" active-class="is-active">
           <Settings :size="20" aria-hidden="true" />

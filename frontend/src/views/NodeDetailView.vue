@@ -27,7 +27,7 @@ const route = useRoute()
 const store = useNodesStore()
 const toast = useToastStore()
 const nodeId = computed(() => (typeof route.params.id === 'string' ? route.params.id : ''))
-const loading = ref(true)
+const loading = ref(!store.details[typeof route.params.id === 'string' ? route.params.id : ''])
 const error = ref('')
 const actionError = ref('')
 const waitingForState = computed(() => store.pendingActuators[nodeId.value] === true)
@@ -36,12 +36,16 @@ const detail = computed(() => store.details[nodeId.value] ?? null)
 watch(
   nodeId,
   async (id) => {
-    loading.value = true
+    if (!id) return
+    const hasCached = Boolean(store.details[id])
+    loading.value = !hasCached
     error.value = ''
     try {
       await store.loadNode(id)
     } catch (cause) {
-      error.value = getApiErrorMessage(cause, 'Detail node tidak dapat dimuat.')
+      if (!hasCached) {
+        error.value = getApiErrorMessage(cause, 'Detail akuarium tidak dapat dimuat.')
+      }
     } finally {
       loading.value = false
     }

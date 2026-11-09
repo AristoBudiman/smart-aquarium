@@ -105,15 +105,16 @@ const chartOption = computed<EChartsOption>(() => {
     xAxis: {
       type: 'category',
       boundaryGap: false,
-      data: points.value.map((point) =>
-        new Intl.DateTimeFormat('id-ID', {
+      data: (() => {
+        const xDateFormatter = new Intl.DateTimeFormat('id-ID', {
           timeZone: 'Asia/Jakarta',
           hour: range.value === '1h' || range.value === '24h' ? '2-digit' : undefined,
           minute: range.value === '1h' ? '2-digit' : undefined,
           day: range.value === '1h' || range.value === '24h' ? undefined : '2-digit',
           month: range.value === '1h' || range.value === '24h' ? undefined : 'short',
-        }).format(new Date(point.ts)),
-      ),
+        })
+        return points.value.map((point) => xDateFormatter.format(new Date(point.ts)))
+      })(),
       axisLine: { lineStyle: { color: axisLineColor } },
       axisLabel: { color: axisLabelColor, fontSize: 13, hideOverlap: true },
     },
@@ -213,7 +214,7 @@ const chartOption = computed<EChartsOption>(() => {
             </div>
           </div>
           <span v-if="points.length" class="chart-updated">
-            Diperbarui {{ formatWib(points.at(-1)?.ts) }} WIB
+            Diperbarui {{ formatWib(points.at(-1)?.ts) }}
           </span>
         </div>
 

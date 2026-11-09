@@ -106,7 +106,7 @@ onUnmounted(() => {
 <template>
   <section class="page">
     <PageHeader
-      :eyebrow="`AKTIVITAS NODE · ${nodeId}`"
+      :eyebrow="`AKTIVITAS AKUARIUM · ${nodeId}`"
       title="Log & notifikasi"
       subtitle="Riwayat perubahan aktuator dan peringatan kualitas air."
     >
@@ -124,7 +124,7 @@ onUnmounted(() => {
         <article class="panel log-panel">
           <div class="panel-heading">
             <div>
-              <p class="eyebrow">RIWAYAT PERANGKAT</p>
+              <p class="eyebrow">RIWAYAT AKUARIUM</p>
               <h2>Aktivitas aktuator</h2>
             </div>
             <span class="count-pill" :aria-label="`Total ${logs.actuators.length} riwayat aktuator`">
@@ -160,7 +160,7 @@ onUnmounted(() => {
                       <span>Pompa filter {{ entry.pump ? 'ON' : 'OFF' }}</span>
                     </span>
                   </div>
-                  <time>{{ formatWib(entry.ts) }} WIB</time>
+                  <time>{{ formatWib(entry.ts) }}</time>
                 </div>
               </div>
             </div>
@@ -197,7 +197,7 @@ onUnmounted(() => {
                     <strong>{{ alert.message }}</strong>
                     <StatusBadge :status="alert.level" />
                   </div>
-                  <time>{{ formatWib(alert.ts) }} WIB</time>
+                  <time>{{ formatWib(alert.ts) }}</time>
                 </div>
               </div>
             </div>
