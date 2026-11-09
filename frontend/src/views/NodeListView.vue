@@ -101,7 +101,7 @@ async function submitClaim() {
         <div class="header-actions-group">
           <div v-if="store.nodes.length" class="online-count">
             <span class="status-dot dot-online" aria-hidden="true"></span>
-            <span>{{ onlineCount }} dari {{ store.nodes.length }} node online</span>
+            <span>{{ onlineCount }} dari {{ store.nodes.length }} akuarium online</span>
           </div>
           <button class="button button-primary" type="button" @click="openClaimModal">
             <Plus :size="18" aria-hidden="true" />
