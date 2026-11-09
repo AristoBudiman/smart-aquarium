@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import { Bell, RefreshCw } from 'lucide-vue-next'
+import { Bell, Droplets, Fan, Flame, RefreshCw } from 'lucide-vue-next'
 import PageFeedback from '../components/PageFeedback.vue'
 import PageHeader from '../components/PageHeader.vue'
 import Paginator from '../components/Paginator.vue'
@@ -146,10 +146,20 @@ onUnmounted(() => {
                     <strong>Perubahan status relay</strong>
                     <span class="source-pill">Mode {{ entry.source }}</span>
                   </div>
-                  <p>
-                    Pemanas {{ entry.heater ? 'ON' : 'OFF' }} · Kipas {{ entry.fan ? 'ON' : 'OFF' }} ·
-                    Pompa {{ entry.pump ? 'ON' : 'OFF' }}
-                  </p>
+                  <div class="log-actuator-pills">
+                    <span class="log-actuator-item" :class="{ 'log-actuator-on': entry.heater === 1 }">
+                      <Flame :size="15" aria-hidden="true" />
+                      <span>Pemanas {{ entry.heater ? 'ON' : 'OFF' }}</span>
+                    </span>
+                    <span class="log-actuator-item" :class="{ 'log-actuator-on': entry.fan === 1 }">
+                      <Fan :size="15" aria-hidden="true" />
+                      <span>Kipas {{ entry.fan ? 'ON' : 'OFF' }}</span>
+                    </span>
+                    <span class="log-actuator-item" :class="{ 'log-actuator-on': entry.pump === 1 }">
+                      <Droplets :size="15" aria-hidden="true" />
+                      <span>Pompa filter {{ entry.pump ? 'ON' : 'OFF' }}</span>
+                    </span>
+                  </div>
                   <time>{{ formatWib(entry.ts) }} WIB</time>
                 </div>
               </div>

@@ -1020,9 +1020,34 @@ a {
   color: var(--color-muted);
 }
 
-.actuator-icon-active {
-  background: var(--color-aqua-light);
+.actuator-icon-heater {
+  color: #c25e09;
+  background: #fff4e8;
+}
+
+.actuator-icon-fan {
+  color: #0369a1;
+  background: #e8f4fc;
+}
+
+.actuator-icon-pump {
   color: var(--color-aqua-dark);
+  background: var(--color-aqua-light);
+}
+
+.actuator-icon-active.actuator-icon-heater {
+  color: #9a3412;
+  background: #ffedd5;
+}
+
+.actuator-icon-active.actuator-icon-fan {
+  color: #075985;
+  background: #bae6fd;
+}
+
+.actuator-icon-active.actuator-icon-pump {
+  color: #115e59;
+  background: #ccfbf1;
 }
 
 .actuator-row strong {
@@ -1244,6 +1269,31 @@ a {
   color: var(--color-ink-secondary);
   font-size: var(--text-secondary);
   line-height: 1.5;
+}
+
+.log-actuator-pills {
+  margin: 6px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.log-actuator-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  background: #f1f5f9;
+  color: var(--color-ink-secondary);
+  font-size: var(--text-secondary);
+  font-weight: 500;
+}
+
+.log-actuator-on {
+  background: var(--color-aqua-light);
+  color: var(--color-aqua-dark);
+  font-weight: 600;
 }
 
 .timeline-content time {

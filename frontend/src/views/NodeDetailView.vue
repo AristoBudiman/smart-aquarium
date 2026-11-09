@@ -81,9 +81,9 @@ async function toggleActuator(key: keyof ActuatorCommand) {
 }
 
 const actuatorItems = computed(() => [
-  { key: 'heater' as const, label: 'Pemanas air', value: detail.value?.heater ?? null, icon: Flame },
-  { key: 'fan' as const, label: 'Kipas pendingin', value: detail.value?.fan ?? null, icon: Fan },
-  { key: 'pump' as const, label: 'Pompa filter', value: detail.value?.pump ?? null, icon: Droplets },
+  { key: 'heater' as const, label: 'Pemanas air', value: detail.value?.heater ?? null },
+  { key: 'fan' as const, label: 'Kipas pendingin', value: detail.value?.fan ?? null },
+  { key: 'pump' as const, label: 'Pompa filter', value: detail.value?.pump ?? null },
 ])
 </script>
 
@@ -203,8 +203,17 @@ const actuatorItems = computed(() => [
             <div class="actuator-list">
               <div v-for="item in actuatorItems" :key="item.key" class="actuator-row">
                 <div class="actuator-info">
-                  <span class="actuator-icon" :class="{ 'actuator-icon-active': item.value === 1 }" aria-hidden="true">
-                    <component :is="item.icon" :size="18" />
+                  <span
+                    class="actuator-icon"
+                    :class="[
+                      `actuator-icon-${item.key}`,
+                      { 'actuator-icon-active': item.value === 1 },
+                    ]"
+                    aria-hidden="true"
+                  >
+                    <Flame v-if="item.key === 'heater'" :size="18" />
+                    <Fan v-else-if="item.key === 'fan'" :size="18" />
+                    <Droplets v-else :size="18" />
                   </span>
                   <div>
                     <strong>{{ item.label }}</strong>
