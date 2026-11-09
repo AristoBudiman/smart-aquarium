@@ -18,11 +18,20 @@ import (
 // SEMENTARA: implementasi Store palsu untuk unit test Peran 3.
 type fakeNotifyStore struct {
 	core.Store
-	chatIDs []string
-	marked  chan int64
+	chatIDs       []string
+	byNodeChatIDs map[string][]string
+	lastNodeID    string
+	mu            sync.Mutex
+	marked        chan int64
 }
 
-func (f *fakeNotifyStore) TelegramChatIDs(_ context.Context) ([]string, error) {
+func (f *fakeNotifyStore) TelegramChatIDs(_ context.Context, nodeID string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastNodeID = nodeID
+	if f.byNodeChatIDs != nil {
+		return f.byNodeChatIDs[nodeID], nil
+	}
 	return f.chatIDs, nil
 }
 
@@ -144,5 +153,78 @@ func TestRedactTokenOnError(t *testing.T) {
 	terfilter := svc.redactToken("Post \"https://api.telegram.org/bot" + token + "/sendMessage\": dial tcp: connection refused")
 	if strings.Contains(terfilter, token) {
 		t.Fatalf("token bocor pada pesan error: %s", terfilter)
+	}
+}
+
+func TestNotifyOnlyToNodeOwner(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		requests []sendMessageReq
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req sendMessageReq
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		mu.Lock()
+		requests = append(requests, req)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
+	store := &fakeNotifyStore{
+		byNodeChatIDs: map[string][]string{
+			"aq-milik-a": {"chat-owner-a"},
+			// "aq-tanpa-pemilik" tidak punya penerima
+		},
+		marked: make(chan int64, 2),
+	}
+
+	svc := New(store, "TOKEN_UJI")
+	svc.baseURL = srv.URL
+
+	// 1. Node milik A -> hanya dikirim ke chat-owner-a
+	svc.Notify(context.Background(), core.Alert{
+		ID:      101,
+		NodeID:  "aq-milik-a",
+		Level:   core.ClassWarning,
+		Message: "Suhu tinggi",
+	})
+
+	select {
+	case id := <-store.marked:
+		if id != 101 {
+			t.Fatalf("MarkAlertSent id = %d, ingin 101", id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("MarkAlertSent tidak dipanggil untuk node milik A")
+	}
+
+	mu.Lock()
+	if len(requests) != 1 || requests[0].ChatID != "chat-owner-a" {
+		mu.Unlock()
+		t.Fatalf("requests = %+v, ingin hanya ke chat-owner-a", requests)
+	}
+	mu.Unlock()
+
+	// 2. Node tanpa pemilik -> tidak ada request keluar dan tidak panggil MarkAlertSent
+	svc.Notify(context.Background(), core.Alert{
+		ID:      102,
+		NodeID:  "aq-tanpa-pemilik",
+		Level:   core.ClassSevere,
+		Message: "Kekeruhan tinggi",
+	})
+
+	select {
+	case id := <-store.marked:
+		t.Fatalf("MarkAlertSent tidak boleh dipanggil untuk node tanpa penerima, dapat id=%d", id)
+	case <-time.After(60 * time.Millisecond):
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requests) != 1 {
+		t.Fatalf("jumlah request = %d, seharusnya tetap 1", len(requests))
 	}
 }

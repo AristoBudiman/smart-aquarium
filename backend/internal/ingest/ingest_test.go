@@ -128,7 +128,7 @@ func (f *fakeStore) SaveAlert(_ context.Context, a core.Alert) (int64, error) {
 }
 
 func (f *fakeStore) MarkAlertSent(_ context.Context, _ int64) error { return nil }
-func (f *fakeStore) TelegramChatIDs(_ context.Context) ([]string, error) {
+func (f *fakeStore) TelegramChatIDs(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
 
