@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { ArrowRight, Droplets, ShieldCheck } from 'lucide-vue-next'
+import ThemeSwitcher from '../components/ThemeSwitcher.vue'
 import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 
@@ -48,6 +49,9 @@ async function submit() {
 
 <template>
   <main class="login-page">
+    <div class="login-topbar">
+      <ThemeSwitcher />
+    </div>
     <div class="login-decoration decoration-one" aria-hidden="true"></div>
     <div class="login-decoration decoration-two" aria-hidden="true"></div>
     <section class="login-panel">

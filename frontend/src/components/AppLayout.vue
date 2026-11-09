@@ -10,6 +10,7 @@ import {
   ShieldCheck,
   User,
 } from 'lucide-vue-next'
+import ThemeSwitcher from './ThemeSwitcher.vue'
 import { useMockApi } from '../api/client'
 import { connectRealtime } from '../api/ws'
 import { useAuthStore } from '../stores/auth'
@@ -55,6 +56,7 @@ function logout() {
           <span class="status-dot dot-online" aria-hidden="true"></span>
           Mode simulasi aktif
         </span>
+        <ThemeSwitcher />
         <span v-if="auth.username" class="user-badge">
           <ShieldCheck v-if="auth.isAdmin" :size="17" aria-hidden="true" />
           <User v-else :size="17" aria-hidden="true" />
@@ -62,7 +64,7 @@ function logout() {
         </span>
         <button class="button button-quiet logout-button" type="button" @click="logout">
           <LogOut :size="18" aria-hidden="true" />
-          <span>Keluar</span>
+          <span class="logout-text">Keluar</span>
         </button>
       </div>
     </header>

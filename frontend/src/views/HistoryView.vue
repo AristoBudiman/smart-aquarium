@@ -18,6 +18,7 @@ import PageHeader from '../components/PageHeader.vue'
 import { getNodeTelemetry } from '../api/nodes'
 import { getApiErrorMessage } from '../api/client'
 import { useNodesStore } from '../stores/nodes'
+import { useThemeStore } from '../stores/theme'
 import { formatNumber, formatWib } from '../utils/format'
 import type { TelemetryPoint } from '../types'
 
@@ -33,6 +34,7 @@ const ranges: { value: RangeKey; label: string; milliseconds: number }[] = [
 
 const route = useRoute()
 const store = useNodesStore()
+const theme = useThemeStore()
 const nodeId = computed(() => (typeof route.params.id === 'string' ? route.params.id : ''))
 const range = ref<RangeKey>('24h')
 const points = ref<TelemetryPoint[]>([])
@@ -66,74 +68,98 @@ watch(
   { immediate: true },
 )
 
-const chartOption = computed<EChartsOption>(() => ({
-  color: ['#0d9488', '#ea580c'],
-  tooltip: { trigger: 'axis' },
-  legend: {
-    top: 0,
-    right: 4,
-    itemWidth: 12,
-    itemHeight: 12,
-    textStyle: { color: '#3e5060', fontSize: 13 },
-  },
-  grid: { left: 48, right: 48, top: 44, bottom: 44 },
-  xAxis: {
-    type: 'category',
-    boundaryGap: false,
-    data: points.value.map((point) =>
-      new Intl.DateTimeFormat('id-ID', {
-        timeZone: 'Asia/Jakarta',
-        hour: range.value === '1h' || range.value === '24h' ? '2-digit' : undefined,
-        minute: range.value === '1h' ? '2-digit' : undefined,
-        day: range.value === '1h' || range.value === '24h' ? undefined : '2-digit',
-        month: range.value === '1h' || range.value === '24h' ? undefined : 'short',
-      }).format(new Date(point.ts)),
-    ),
-    axisLine: { lineStyle: { color: '#dbe4eb' } },
-    axisLabel: { color: '#475569', fontSize: 13, hideOverlap: true },
-  },
-  yAxis: [
-    {
-      type: 'value',
-      name: '°C',
-      min: 0,
-      max: 40,
-      nameTextStyle: { color: '#475569', fontSize: 13 },
-      axisLabel: { color: '#475569', fontSize: 13 },
-      splitLine: { lineStyle: { color: '#eef2f6' } },
+function readCssVar(name: string): string {
+  if (typeof document === 'undefined') return ''
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+}
+
+const chartOption = computed<EChartsOption>(() => {
+  // Baca ulang variabel CSS saat tema terang/gelap berubah
+  void theme.isDark
+  const seriesTemp = readCssVar('--chart-series-temp')
+  const seriesNtu = readCssVar('--chart-series-ntu')
+  const axisLabelColor = readCssVar('--chart-label')
+  const axisLineColor = readCssVar('--chart-axis')
+  const splitLineColor = readCssVar('--chart-grid')
+  const tooltipBg = readCssVar('--chart-tooltip-bg')
+  const tooltipBorder = readCssVar('--chart-tooltip-border')
+  const tooltipText = readCssVar('--chart-tooltip-text')
+
+  return {
+    backgroundColor: 'transparent',
+    color: [seriesTemp, seriesNtu],
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: tooltipBg,
+      borderColor: tooltipBorder,
+      textStyle: { color: tooltipText, fontSize: 13 },
     },
-    {
-      type: 'value',
-      name: 'NTU',
-      min: 0,
-      max: 200,
-      nameTextStyle: { color: '#475569', fontSize: 13 },
-      axisLabel: { color: '#475569', fontSize: 13 },
-      splitLine: { show: false },
+    legend: {
+      top: 0,
+      right: 4,
+      itemWidth: 12,
+      itemHeight: 12,
+      textStyle: { color: axisLabelColor, fontSize: 13 },
     },
-  ],
-  dataZoom: [{ type: 'inside', zoomOnMouseWheel: false }],
-  series: [
-    {
-      name: 'Suhu (°C)',
-      type: 'line',
-      smooth: true,
-      showSymbol: false,
-      lineStyle: { width: 3 },
-      areaStyle: { opacity: 0.09 },
-      data: points.value.map((point) => point.temp),
+    grid: { left: 48, right: 48, top: 44, bottom: 44 },
+    xAxis: {
+      type: 'category',
+      boundaryGap: false,
+      data: points.value.map((point) =>
+        new Intl.DateTimeFormat('id-ID', {
+          timeZone: 'Asia/Jakarta',
+          hour: range.value === '1h' || range.value === '24h' ? '2-digit' : undefined,
+          minute: range.value === '1h' ? '2-digit' : undefined,
+          day: range.value === '1h' || range.value === '24h' ? undefined : '2-digit',
+          month: range.value === '1h' || range.value === '24h' ? undefined : 'short',
+        }).format(new Date(point.ts)),
+      ),
+      axisLine: { lineStyle: { color: axisLineColor } },
+      axisLabel: { color: axisLabelColor, fontSize: 13, hideOverlap: true },
     },
-    {
-      name: 'Kekeruhan (NTU)',
-      type: 'line',
-      yAxisIndex: 1,
-      smooth: true,
-      showSymbol: false,
-      lineStyle: { width: 3 },
-      data: points.value.map((point) => point.ntu),
-    },
-  ],
-}))
+    yAxis: [
+      {
+        type: 'value',
+        name: '°C',
+        min: 0,
+        max: 40,
+        nameTextStyle: { color: axisLabelColor, fontSize: 13 },
+        axisLabel: { color: axisLabelColor, fontSize: 13 },
+        splitLine: { lineStyle: { color: splitLineColor } },
+      },
+      {
+        type: 'value',
+        name: 'NTU',
+        min: 0,
+        max: 200,
+        nameTextStyle: { color: axisLabelColor, fontSize: 13 },
+        axisLabel: { color: axisLabelColor, fontSize: 13 },
+        splitLine: { show: false },
+      },
+    ],
+    dataZoom: [{ type: 'inside', zoomOnMouseWheel: false }],
+    series: [
+      {
+        name: 'Suhu (°C)',
+        type: 'line',
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 3 },
+        areaStyle: { opacity: theme.isDark ? 0.16 : 0.09 },
+        data: points.value.map((point) => point.temp),
+      },
+      {
+        name: 'Kekeruhan (NTU)',
+        type: 'line',
+        yAxisIndex: 1,
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: 3 },
+        data: points.value.map((point) => point.ntu),
+      },
+    ],
+  }
+})
 </script>
 
 <template>
