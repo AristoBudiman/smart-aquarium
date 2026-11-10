@@ -2,10 +2,10 @@
 
 Sistem IoT untuk memantau dan mengendalikan kualitas air akuarium (suhu dan kekeruhan). Data dari NodeMCU ESP8266 dikirim lewat MQTT ke server mandiri, diklasifikasikan oleh tiga model Random Forest, lalu hasilnya langsung menentukan aksi pemanas, kipas, dan pompa filter. Sistem mendukung banyak akuarium dan banyak pengguna, tanpa platform IoT pihak ketiga.
 
-Tugas Besar Teknologi IoT 2026 — Program Studi Informatika, FTIDS, Universitas Sebelas Maret.
+Tugas Besar Teknologi IoT 2026 — Program Studi Informatika, FATISDA, Universitas Sebelas Maret.
 
 - Website: https://smart-aquarium.duckdns.org
-- Video demo: [tautan video]
+- Video demo: https://youtu.be/QylsJIP_vZs
 
 ![Arsitektur sistem](docs/img/arsitektur.png)
 
