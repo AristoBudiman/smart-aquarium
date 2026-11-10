@@ -73,7 +73,7 @@ onUnmounted(() => {
           <span class="status-dot" :class="node.online ? 'dot-online' : 'dot-offline'"></span>
           {{ node.online ? 'Online' : 'Offline' }}
         </span>
-        <StatusBadge :status="node.status" :offline="!node.online" />
+        <StatusBadge v-if="node.online" :status="node.status" />
       </div>
     </div>
 
